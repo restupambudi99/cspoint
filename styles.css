@@ -106,6 +106,8 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .warning { color: #a66b1e; font-size: 13px; }
 .switch-row.disabled { opacity: .55; }
 .field-form { border-top: 1px solid var(--line); padding-top: 24px; }
+.field-item { display: grid; gap: 5px; text-align: left; }
+.field-item span { color: var(--muted); font-size: 13px; }
 @media (max-width: 700px) { .builder-head { align-items: flex-start; flex-direction: column; } .builder-actions { width: 100%; } }
 @media (max-width: 720px) { .inbox-layout { grid-template-columns: 1fr; } .conversation-list { border-right: 0; border-bottom: 1px solid var(--line); } }
 .section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 18px; }
