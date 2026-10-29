@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Niaw — Pengaturan</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#dashboard" aria-label="Niaw">Niaw</a>
+      <nav class="nav" aria-label="Navigasi utama">
+        <a href="#dashboard" data-page="Dashboard" data-description="Kirim pesan WhatsApp">Dashboard</a>
+        <a href="#inbox" data-page="Kotak Masuk" data-description="Baca dan balas pesan">Kotak Masuk</a>
+        <a href="#ai-agent" data-page="AI Agent" data-description="Balasan AI per nomor">AI Agent</a>
+        <a href="#orders" data-page="Pesanan" data-description="Pesanan & resi">Pesanan</a>
+        <a href="#products" data-page="Produk" data-description="Katalog & harga">Produk</a>
+        <a href="#contacts" data-page="Kontak" data-description="Kelola daftar kontak">Kontak</a>
+        <a href="#forms" data-page="Form Builder" data-description="Buat form kustom">Form Builder</a>
+        <a href="#templates" data-page="Template FU" data-description="Atur template follow up">Template FU</a>
+        <a class="active" href="#settings" data-page="Pengaturan" data-description="Konfigurasi API">Pengaturan</a>
+        <a href="#account" data-page="Akun & Langganan" data-description="Paket, kuota & profil toko">Akun & Langganan</a>
+      </nav>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div><h1 id="page-title">Pengaturan</h1><p id="page-description">Konfigurasi API</p></div>
+        <a class="enterprise" href="#account">Paket Enterprise</a>
+        <button class="logout" type="button" id="logout">Logout</button>
+      </header>
+      <div class="notice">Jika pesan otomatis tidak merespon silahkan putuskan instance dan scan ulang QR lagi</div>
+      <section id="page-content" class="content"></section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
