@@ -102,6 +102,7 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .editor-toolbar button:focus-visible, .upload-box:focus-visible { outline: 3px solid #cfd0ff; outline-offset: 2px; }
 .builder-grid textarea { width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 0 0 8px 8px; color: var(--ink); padding: 10px 12px; }
 .upload-box { display: grid; justify-items: center; gap: 6px; border: 1px dashed #cfd4df; border-radius: 9px; color: var(--muted); cursor: pointer; padding: 28px; text-align: center; }
+.upload-box[data-error="true"] { border-color: var(--danger); color: var(--danger); }
 .upload-box span { font-size: 12px; }
 .warning { color: #a66b1e; font-size: 13px; }
 .switch-row.disabled { opacity: .55; }
