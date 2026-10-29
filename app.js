@@ -32,6 +32,11 @@ function dashboardPage() {
   content.querySelector('[data-action="send-message"]').addEventListener('click', (event) => { event.currentTarget.textContent = 'Tersimpan'; });
 }
 
+function aiAgentPage() {
+  content.innerHTML = `<section class="section ai-agent"><h2>AI Agent</h2><p class="intro">Atur gaya balasan AI untuk tiap nomor WhatsApp.</p><div class="tabs" role="tablist"><button class="tab active" type="button" role="tab">Pengaturan per Nomor</button><button class="tab" type="button" role="tab">Pembayaran</button><button class="tab" type="button" role="tab">Data Live</button><button class="tab" type="button" role="tab">Virtual Office</button></div><div class="empty"><strong>Belum ada nomor WhatsApp.</strong><span>Tambahkan instance di Pengaturan terlebih dahulu.</span></div></section>`;
+  content.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => { content.querySelectorAll('.tab').forEach((item) => item.classList.remove('active')); tab.classList.add('active'); }));
+}
+
 function bindSettings() {
   const min = document.querySelector('#min-interval'); const max = document.querySelector('#max-interval');
   const sync = () => { document.querySelector('#min-value').textContent = min.value; document.querySelector('#max-value').textContent = max.value; document.querySelector('#hint-min').textContent = min.value; document.querySelector('#hint-max').textContent = max.value; };
@@ -39,7 +44,7 @@ function bindSettings() {
   content.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => { button.textContent = 'Tersimpan'; setTimeout(() => { button.textContent = button.dataset.action === 'activate-inbox' ? 'Aktifkan' : button.dataset.action === 'add-instance' ? 'Tambah' : button.dataset.action === 'save-shipping' ? 'Simpan Ekspedisi' : 'Simpan Pengaturan'; }, 1200); }));
 }
 
-function renderPage() { const active = document.querySelector(`.nav a[href="${location.hash || '#settings'}"]`) || document.querySelector('.nav a[href="#settings"]'); document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a === active)); title.textContent = active.dataset.page; description.textContent = active.dataset.description; if (active.dataset.page === 'Pengaturan') settingsPage(); else if (active.dataset.page === 'Dashboard') dashboardPage(); else content.innerHTML = `<section class="section"><h2>${active.dataset.page}</h2><p class="placeholder">${active.dataset.description}</p></section>`; }
+function renderPage() { const active = document.querySelector(`.nav a[href="${location.hash || '#settings'}"]`) || document.querySelector('.nav a[href="#settings"]'); document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a === active)); title.textContent = active.dataset.page; description.textContent = active.dataset.description; if (active.dataset.page === 'Pengaturan') settingsPage(); else if (active.dataset.page === 'Dashboard') dashboardPage(); else if (active.dataset.page === 'AI Agent') aiAgentPage(); else content.innerHTML = `<section class="section"><h2>${active.dataset.page}</h2><p class="placeholder">${active.dataset.description}</p></section>`; }
 document.querySelectorAll('.nav a, .brand, .enterprise').forEach((link) => link.addEventListener('click', () => setTimeout(renderPage, 0)));
 document.querySelector('#logout').addEventListener('click', () => { document.querySelector('#logout').textContent = 'Logout'; });
 renderPage();

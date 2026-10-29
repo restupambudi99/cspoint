@@ -45,6 +45,10 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .compose .field { max-width: 620px; }
 .compose textarea { width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; color: var(--ink); }
 .history-filter { border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); padding: 9px 11px; }
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin: 24px -24px 0; padding: 0 24px; overflow-x: auto; }
+.tab { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; padding: 12px 4px; white-space: nowrap; }
+.tab.active, .tab:hover, .tab:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 3px solid #cfd0ff; outline-offset: 2px; }
 .section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 18px; }
 .section h2 { font-size: 17px; letter-spacing: -.015em; }
 .section .intro { color: var(--muted); margin-top: 7px; line-height: 1.5; }
