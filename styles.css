@@ -90,6 +90,23 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .choice small { color: var(--muted); line-height: 1.4; }
 .choice.active, .choice:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: 3px solid #cfd0ff; outline-offset: 2px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.builder-page { max-width: 1000px; }
+.builder-head { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.builder-actions { display: flex; gap: 8px; }
+.builder-grid { margin-top: 24px; }
+.builder-grid .full { grid-column: 1 / -1; }
+.builder-grid h3 { font-size: 16px; margin: 2px 0 0; }
+.hint-inline, .hint { color: var(--muted); font-size: 13px; }
+.editor-toolbar { display: flex; flex-wrap: wrap; gap: 5px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; padding: 8px; }
+.editor-toolbar button { border: 0; border-radius: 5px; background: var(--bg); color: var(--muted); cursor: pointer; padding: 6px 8px; font-size: 12px; }
+.editor-toolbar button:focus-visible, .upload-box:focus-visible { outline: 3px solid #cfd0ff; outline-offset: 2px; }
+.builder-grid textarea { width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 0 0 8px 8px; color: var(--ink); padding: 10px 12px; }
+.upload-box { display: grid; justify-items: center; gap: 6px; border: 1px dashed #cfd4df; border-radius: 9px; color: var(--muted); cursor: pointer; padding: 28px; text-align: center; }
+.upload-box span { font-size: 12px; }
+.warning { color: #a66b1e; font-size: 13px; }
+.switch-row.disabled { opacity: .55; }
+.field-form { border-top: 1px solid var(--line); padding-top: 24px; }
+@media (max-width: 700px) { .builder-head { align-items: flex-start; flex-direction: column; } .builder-actions { width: 100%; } }
 @media (max-width: 720px) { .inbox-layout { grid-template-columns: 1fr; } .conversation-list { border-right: 0; border-bottom: 1px solid var(--line); } }
 .section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 18px; }
 .section h2 { font-size: 17px; letter-spacing: -.015em; }
