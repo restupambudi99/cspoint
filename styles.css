@@ -108,6 +108,14 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .field-form { border-top: 1px solid var(--line); padding-top: 24px; }
 .field-item { display: grid; gap: 5px; text-align: left; }
 .field-item span { color: var(--muted); font-size: 13px; }
+.field-row { display: grid; grid-template-columns: 18px repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 18px; text-align: left; }
+.field-row .field { gap: 7px; }
+.field-row .field > span { color: var(--muted); font-size: 13px; }
+.drag-handle { align-self: center; color: var(--muted); letter-spacing: -5px; cursor: grab; }
+.required-toggle { display: flex; align-items: center; gap: 7px; grid-column: 2 / 4; color: var(--muted); font-size: 13px; }
+.required-toggle input { accent-color: var(--accent); }
+.delete-field { border: 0; background: transparent; color: var(--danger); cursor: pointer; font-size: 20px; padding: 6px; }
+@media (max-width: 700px) { .field-row { grid-template-columns: 18px 1fr; } .field-row .field { grid-column: 2; } .required-toggle { grid-column: 2; } .delete-field { grid-column: 2; justify-self: start; } }
 @media (max-width: 700px) { .builder-head { align-items: flex-start; flex-direction: column; } .builder-actions { width: 100%; } }
 @media (max-width: 720px) { .inbox-layout { grid-template-columns: 1fr; } .conversation-list { border-right: 0; border-bottom: 1px solid var(--line); } }
 .section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 18px; }
