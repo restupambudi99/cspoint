@@ -115,6 +115,7 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .required-toggle { display: flex; align-items: center; gap: 7px; grid-column: 2 / 4; color: var(--muted); font-size: 13px; }
 .required-toggle input { accent-color: var(--accent); }
 .delete-field { border: 0; background: transparent; color: var(--danger); cursor: pointer; font-size: 20px; padding: 6px; }
+.options-config { grid-column: 2 / 5; }
 @media (max-width: 700px) { .field-row { grid-template-columns: 18px 1fr; } .field-row .field { grid-column: 2; } .required-toggle { grid-column: 2; } .delete-field { grid-column: 2; justify-self: start; } }
 @media (max-width: 700px) { .builder-head { align-items: flex-start; flex-direction: column; } .builder-actions { width: 100%; } }
 @media (max-width: 720px) { .inbox-layout { grid-template-columns: 1fr; } .conversation-list { border-right: 0; border-bottom: 1px solid var(--line); } }
