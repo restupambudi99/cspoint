@@ -37,6 +37,19 @@ function aiAgentPage() {
   content.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => { content.querySelectorAll('.tab').forEach((item) => item.classList.remove('active')); tab.classList.add('active'); }));
 }
 
+function inboxPage() {
+  content.innerHTML = `<section class="inbox-layout"><div class="conversation-list"><div class="list-head"><h2>Kotak Masuk</h2><span>0 percakapan</span></div><button class="reset-link" type="button">Reset semua</button><div class="empty compact"><strong>Belum ada percakapan</strong><span>Pesan WhatsApp masuk akan muncul di sini.</span></div></div><div class="conversation-empty"><strong>Pilih percakapan</strong><span>Pilih kontak di sebelah kiri untuk melihat dan membalas pesan.</span></div></section>`;
+}
+
+function ordersPage() {
+  content.innerHTML = `<section class="section"><h2>Pesanan</h2><p class="intro">Pesanan yang dicatat AI dari chat WhatsApp, dikelompokkan berdasarkan status pengerjaan.</p><div class="status-tabs">${['Semua','Menunggu Bayar','Diproses','Selesai'].map((x) => `<button type="button" class="tab ${x === 'Semua' ? 'active' : ''}">${x} (0)</button>`).join('')}</div><button class="reset-link" type="button">Reset semua pesanan</button><div class="order-filters">${['Semua jenis','Ekspedisi','Kurir Toko','Kurir Instan','Ambil di Toko','Digital'].map((x) => `<button type="button" class="filter">${x} (0)</button>`).join('')}</div><div class="empty"><strong>Belum ada pesanan.</strong></div></section><section class="section"><h2>Template Pesan Resi</h2><p class="intro">Gunakan {nama}, {produk}, {qty}, {kurir}, {resi}, {total}, {alamat}.</p><textarea class="template-input" rows="4">Halo Kak {nama}, pesanan {produk} ({qty}) sudah dikirim via {kurir} dengan nomor resi: {resi}. Mohon ditunggu kedatangannya ya Kak, terima kasih!</textarea><div class="section-actions"><button class="button" type="button" data-action="save-template">Simpan Template</button></div></section>`;
+  content.querySelector('[data-action="save-template"]').addEventListener('click', (event) => { event.currentTarget.textContent = 'Tersimpan'; });
+}
+
+function productsPage() {
+  content.innerHTML = `<section class="section product-empty"><p class="placeholder">Aktif</p></section>`;
+}
+
 function bindSettings() {
   const min = document.querySelector('#min-interval'); const max = document.querySelector('#max-interval');
   const sync = () => { document.querySelector('#min-value').textContent = min.value; document.querySelector('#max-value').textContent = max.value; document.querySelector('#hint-min').textContent = min.value; document.querySelector('#hint-max').textContent = max.value; };
@@ -44,7 +57,7 @@ function bindSettings() {
   content.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => { button.textContent = 'Tersimpan'; setTimeout(() => { button.textContent = button.dataset.action === 'activate-inbox' ? 'Aktifkan' : button.dataset.action === 'add-instance' ? 'Tambah' : button.dataset.action === 'save-shipping' ? 'Simpan Ekspedisi' : 'Simpan Pengaturan'; }, 1200); }));
 }
 
-function renderPage() { const active = document.querySelector(`.nav a[href="${location.hash || '#settings'}"]`) || document.querySelector('.nav a[href="#settings"]'); document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a === active)); title.textContent = active.dataset.page; description.textContent = active.dataset.description; if (active.dataset.page === 'Pengaturan') settingsPage(); else if (active.dataset.page === 'Dashboard') dashboardPage(); else if (active.dataset.page === 'AI Agent') aiAgentPage(); else content.innerHTML = `<section class="section"><h2>${active.dataset.page}</h2><p class="placeholder">${active.dataset.description}</p></section>`; }
+function renderPage() { const active = document.querySelector(`.nav a[href="${location.hash || '#settings'}"]`) || document.querySelector('.nav a[href="#settings"]'); document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a === active)); title.textContent = active.dataset.page; description.textContent = active.dataset.description; if (active.dataset.page === 'Pengaturan') settingsPage(); else if (active.dataset.page === 'Dashboard') dashboardPage(); else if (active.dataset.page === 'AI Agent') aiAgentPage(); else if (active.dataset.page === 'Kotak Masuk') inboxPage(); else if (active.dataset.page === 'Pesanan') ordersPage(); else if (active.dataset.page === 'Produk') productsPage(); else content.innerHTML = `<section class="section"><h2>${active.dataset.page}</h2><p class="placeholder">${active.dataset.description}</p></section>`; }
 document.querySelectorAll('.nav a, .brand, .enterprise').forEach((link) => link.addEventListener('click', () => setTimeout(renderPage, 0)));
 document.querySelector('#logout').addEventListener('click', () => { document.querySelector('#logout').textContent = 'Logout'; });
 renderPage();

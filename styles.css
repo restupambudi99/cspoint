@@ -49,6 +49,23 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .tab { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; padding: 12px 4px; white-space: nowrap; }
 .tab.active, .tab:hover, .tab:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
 .tab:focus-visible { outline: 3px solid #cfd0ff; outline-offset: 2px; }
+.status-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 16px; }
+.status-tabs .tab { border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
+.status-tabs .tab.active { border-color: var(--accent); background: var(--accent-soft); }
+.reset-link { border: 0; background: transparent; color: var(--danger); cursor: pointer; padding: 4px 0; }
+.order-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.filter { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; padding: 9px 12px; }
+.template-input { width: 100%; margin-top: 22px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 12px; }
+.inbox-layout { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(0, 1.2fr); min-height: 520px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: clip; }
+.conversation-list { border-right: 1px solid var(--line); padding: 22px; }
+.list-head { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.list-head h2 { font-size: 18px; }
+.list-head span { color: var(--muted); font-size: 13px; }
+.compact { border: 0; padding: 110px 8px 20px; }
+.conversation-empty { display: grid; place-content: center; gap: 7px; color: var(--muted); text-align: center; padding: 28px; }
+.conversation-empty strong { color: var(--ink); }
+.product-empty { min-height: 360px; }
+@media (max-width: 720px) { .inbox-layout { grid-template-columns: 1fr; } .conversation-list { border-right: 0; border-bottom: 1px solid var(--line); } }
 .section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 18px; }
 .section h2 { font-size: 17px; letter-spacing: -.015em; }
 .section .intro { color: var(--muted); margin-top: 7px; line-height: 1.5; }
