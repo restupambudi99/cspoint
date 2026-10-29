@@ -55,7 +55,20 @@ function contactsPage() {
 }
 
 function formsPage() {
-  content.innerHTML = `<section class="section forms"><div class="section-head"><div><h2>Form Builder</h2><p class="intro">Buat dan kelola form kustom seperti Google Forms</p></div><span class="status-label">Aktif</span></div><div class="section-actions"><button class="button" type="button">Buat Form Baru</button></div><h2 class="subheading">Daftar Form</h2><p class="intro">Semua form yang telah dibuat. Klik untuk mengedit atau melihat submissions.</p><div class="empty"><span>Memuat data...</span></div></section>`;
+  content.innerHTML = `<section class="section forms"><div class="section-head"><div><h2>Form Builder</h2><p class="intro">Buat dan kelola form kustom seperti Google Forms</p></div><span class="status-label">Aktif</span></div><div class="section-actions"><button class="button" type="button" data-open-form>Buat Form Baru</button></div><h2 class="subheading">Daftar Form</h2><p class="intro">Semua form yang telah dibuat. Klik untuk mengedit atau melihat submissions.</p><div class="empty"><span>Memuat data...</span></div></section>`;
+  content.querySelector('[data-open-form]').addEventListener('click', openFormModal);
+}
+
+function openFormModal() {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="new-form-title"><button class="modal-close" type="button" aria-label="Close">×</button><h2 id="new-form-title">Buat Form Baru</h2><p class="intro">Masukkan nama dan deskripsi untuk form baru Anda</p><div class="template-choice"><span>Template</span><button class="choice active" type="button"><strong>Form Biasa</strong><small>Pendaftaran, survei, event</small></button><button class="choice" type="button"><strong>Formulir Order</strong><small>Katalog produk, ongkir & total otomatis</small></button></div><div class="field"><label for="new-form-name">Nama Form</label><input id="new-form-name" placeholder="Contoh: Form Pendaftaran"></div><div class="field"><label for="new-form-description">Deskripsi (opsional)</label><input id="new-form-description" placeholder="Deskripsi singkat tentang form ini"></div><div class="modal-actions"><button class="button secondary" type="button" data-cancel-form>Batal</button><button class="button" type="button" data-create-form>Buat Form</button></div></div>`;
+  document.body.append(modal);
+  modal.querySelectorAll('.choice').forEach((choice) => choice.addEventListener('click', () => { modal.querySelectorAll('.choice').forEach((item) => item.classList.remove('active')); choice.classList.add('active'); }));
+  modal.querySelector('[data-cancel-form]').addEventListener('click', () => modal.remove());
+  modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+  modal.querySelector('[data-create-form]').addEventListener('click', () => modal.remove());
+  modal.querySelector('#new-form-name').focus();
 }
 
 function bindSettings() {

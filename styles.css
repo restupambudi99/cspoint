@@ -80,6 +80,16 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .status-label { color: var(--accent); font-size: 14px; }
 .subheading { margin-top: 28px; font-size: 17px; }
 .forms .empty { margin-top: 22px; }
+.modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(16 22 35 / .42); z-index: 5; }
+.modal { width: min(520px, 100%); display: grid; gap: 16px; border-radius: 14px; background: var(--surface); padding: 26px; box-shadow: 0 20px 70px rgb(16 22 35 / .22); }
+.modal h2 { font-size: 20px; }
+.modal-close { justify-self: end; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 24px; line-height: 1; }
+.template-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.template-choice > span { grid-column: 1 / -1; color: var(--muted); font-size: 14px; }
+.choice { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); cursor: pointer; padding: 13px; text-align: left; }
+.choice small { color: var(--muted); line-height: 1.4; }
+.choice.active, .choice:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: 3px solid #cfd0ff; outline-offset: 2px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 @media (max-width: 720px) { .inbox-layout { grid-template-columns: 1fr; } .conversation-list { border-right: 0; border-bottom: 1px solid var(--line); } }
 .section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 18px; }
 .section h2 { font-size: 17px; letter-spacing: -.015em; }
