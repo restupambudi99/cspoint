@@ -108,6 +108,9 @@ h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: b
 .field-form { border-top: 1px solid var(--line); padding-top: 24px; }
 .field-item { display: grid; gap: 5px; text-align: left; }
 .field-item span { color: var(--muted); font-size: 13px; }
+.preview-field { display: grid; gap: 7px; margin-top: 12px; }
+.preview-field label { color: var(--ink); font-size: 14px; }
+.preview-field input { border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 10px 12px; }
 .field-row { display: grid; grid-template-columns: 18px repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 18px; text-align: left; }
 .field-row .field { gap: 7px; }
 .field-row .field > span { color: var(--muted); font-size: 13px; }
