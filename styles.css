@@ -178,6 +178,23 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .switch input:checked + .track { background: var(--accent); }
 .switch input:checked + .track::after { transform: translateX(18px); }
 .placeholder { color: var(--muted); line-height: 1.6; }
+.templates-page { max-width: 1000px; }
+.template-intro { margin-bottom: 24px; }
+.template-intro h2 { font-size: 26px; letter-spacing: -.03em; }
+.rotator-guide { border-color: #f4cdbb; background: linear-gradient(135deg, var(--surface), #fffaf7); }
+.guide-title, .fu-title, .fu-editor-head { display: flex; align-items: center; gap: 12px; }
+.guide-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; background: var(--accent); color: var(--white); font-size: 25px; }
+.guide-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.guide-grid > div { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.guide-grid span, .fu-editor .field > span { color: var(--ink); font-size: 14px; }
+.guide-grid code { width: fit-content; border-radius: 5px; background: var(--soft); color: var(--ink); padding: 4px 6px; font-size: 12px; }
+.fu-editor { margin-bottom: 18px; }
+.fu-editor-head { justify-content: space-between; align-items: flex-start; }
+.fu-badge { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px; background: var(--accent); color: var(--white); font-weight: 700; }
+.fu-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+.rotator-empty { border-radius: 12px; background: var(--soft); color: var(--muted); padding: 12px; }
+.fu-message { margin-top: 16px; }
+@media (max-width: 700px) { .guide-grid, .fu-form-grid { grid-template-columns: 1fr; } .fu-editor-head { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 820px) { .app-shell { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; } .brand { padding: 0 8px 14px; } .nav { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; } .nav a { white-space: nowrap; } .topbar, .content { padding-left: 20px; padding-right: 20px; } .notice { margin-left: 20px; margin-right: 20px; } }
 @media (max-width: 560px) { .topbar { align-items: flex-start; flex-wrap: wrap; } .enterprise { order: 3; } .form-grid, .checks { grid-template-columns: 1fr; } .checks { gap: 13px; } }
 @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .section-head { display: grid; } }
