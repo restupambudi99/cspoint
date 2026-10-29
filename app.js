@@ -18,6 +18,20 @@ function settingsPage() {
   bindSettings();
 }
 
+function dashboardPage() {
+  content.innerHTML = `
+    <section class="stats" aria-label="Ringkasan pesan">
+      ${[['Total','0'],['Terkirim','0'],['Gagal','0'],['Pending','0']].map(([label, value]) => `<div class="stat"><span>${label}</span><strong>${value}</strong></div>`).join('')}
+    </section>
+    <section class="section compose"><h2>Kirim Pesan</h2><p class="intro">Kirim pesan WhatsApp ke nomor tujuan</p>
+      <div class="field"><label for="phone">Nomor WhatsApp</label><input id="phone" type="tel" placeholder="Format: 08xxx atau 628xxx (Indonesia)"></div>
+      <div class="field"><label for="message">Pesan</label><textarea id="message" rows="5"></textarea></div>
+      <div class="section-actions"><button class="button" type="button" data-action="send-message">Kirim Pesan</button></div>
+    </section>
+    <section class="section"><div class="section-head"><div><h2>Riwayat Pesan</h2><p class="intro">0 pesan total • Halaman 1 dari 1</p></div><select class="history-filter" aria-label="Filter status"><option>Semua Status</option></select></div><div class="empty"><strong>Belum ada pesan yang dikirim</strong></div></section>`;
+  content.querySelector('[data-action="send-message"]').addEventListener('click', (event) => { event.currentTarget.textContent = 'Tersimpan'; });
+}
+
 function bindSettings() {
   const min = document.querySelector('#min-interval'); const max = document.querySelector('#max-interval');
   const sync = () => { document.querySelector('#min-value').textContent = min.value; document.querySelector('#max-value').textContent = max.value; document.querySelector('#hint-min').textContent = min.value; document.querySelector('#hint-max').textContent = max.value; };
@@ -25,7 +39,7 @@ function bindSettings() {
   content.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => { button.textContent = 'Tersimpan'; setTimeout(() => { button.textContent = button.dataset.action === 'activate-inbox' ? 'Aktifkan' : button.dataset.action === 'add-instance' ? 'Tambah' : button.dataset.action === 'save-shipping' ? 'Simpan Ekspedisi' : 'Simpan Pengaturan'; }, 1200); }));
 }
 
-function renderPage() { const active = document.querySelector(`.nav a[href="${location.hash || '#settings'}"]`) || document.querySelector('.nav a[href="#settings"]'); document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a === active)); title.textContent = active.dataset.page; description.textContent = active.dataset.description; if (active.dataset.page === 'Pengaturan') settingsPage(); else content.innerHTML = `<section class="section"><h2>${active.dataset.page}</h2><p class="placeholder">${active.dataset.description}</p></section>`; }
+function renderPage() { const active = document.querySelector(`.nav a[href="${location.hash || '#settings'}"]`) || document.querySelector('.nav a[href="#settings"]'); document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a === active)); title.textContent = active.dataset.page; description.textContent = active.dataset.description; if (active.dataset.page === 'Pengaturan') settingsPage(); else if (active.dataset.page === 'Dashboard') dashboardPage(); else content.innerHTML = `<section class="section"><h2>${active.dataset.page}</h2><p class="placeholder">${active.dataset.description}</p></section>`; }
 document.querySelectorAll('.nav a, .brand, .enterprise').forEach((link) => link.addEventListener('click', () => setTimeout(renderPage, 0)));
 document.querySelector('#logout').addEventListener('click', () => { document.querySelector('#logout').textContent = 'Logout'; });
 renderPage();
