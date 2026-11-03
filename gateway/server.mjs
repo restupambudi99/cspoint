@@ -295,7 +295,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (method === 'GET' && path === '/settings') { send(res, 200, store.settings()); return; }
-    if (method === 'POST' && path === '/settings') { send(res, 200, store.saveSettings(await readJson(req))); return; }
+    if (method === 'POST' && path === '/settings') { send(res, 200, store.saveSettings(await readJson(req, 12000000))); return; }
 
     if (method === 'GET' && path === '/agent') { send(res, 200, store.agent(url.searchParams.get('instance') || 'default')); return; }
     if (method === 'POST' && path === '/agent') { send(res, 200, store.saveAgent(await readJson(req))); return; }

@@ -40,6 +40,8 @@ export function openStore(path) {
         sendMode: stored.sendMode || 'Aman (bertahap)',
         autoReply: stored.autoReply === 'true',
         saveHistory: stored.saveHistory !== 'false',
+        shippingPdfName: stored.shippingPdfName || '',
+        shippingPdfSize: int(stored.shippingPdfSize, 0),
       };
     },
     saveSettings(patch = {}) {
@@ -56,10 +58,14 @@ export function openStore(path) {
         sendMode: ['Aman (bertahap)', 'Normal'].includes(patch.sendMode) ? patch.sendMode : (current.sendMode || 'Aman (bertahap)'),
         autoReply: patch.autoReply === undefined ? Boolean(current.autoReply) : Boolean(patch.autoReply),
         saveHistory: patch.saveHistory === undefined ? current.saveHistory !== false : Boolean(patch.saveHistory),
+        shippingPdfName: patch.shippingPdfName === undefined ? current.shippingPdfName : text(patch.shippingPdfName, 180),
+        shippingPdfContent: patch.shippingPdfContent === undefined ? undefined : String(patch.shippingPdfContent),
+        shippingPdfMime: patch.shippingPdfMime === undefined ? undefined : text(patch.shippingPdfMime, 80),
+        shippingPdfSize: patch.shippingPdfSize === undefined ? current.shippingPdfSize : Math.max(0, int(patch.shippingPdfSize)),
       };
       if (next.maxInterval < next.minInterval) next.maxInterval = next.minInterval;
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
-      for (const [key, value] of Object.entries(next)) statement.run(key, key === 'couriers' ? JSON.stringify(value) : String(value));
+      for (const [key, value] of Object.entries(next)) { if (value === undefined) continue; statement.run(key, key === 'couriers' ? JSON.stringify(value) : String(value)); }
       return next;
     },
 

@@ -317,4 +317,5 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .hint[data-kind="error"] { color: #b3261e; }
 .list { display: grid; gap: 10px; margin-top: 20px; }
 .knowledge-dropzone { display: grid; align-content: center; gap: 7px; min-height: 118px; border: 1px dashed #f0a078; border-radius: 12px; background: #fff8f3; color: var(--muted); padding: 18px; }
+.manual-shipping-card { display: grid; gap: 14px; }.shipping-pdf-current { border-radius: 10px; background: #fff8f3; color: var(--muted); padding: 12px; font-size: 13px; }
 .knowledge-dropzone strong { color: var(--accent); font-size: 15px; }

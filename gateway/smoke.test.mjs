@@ -44,6 +44,14 @@ try {
   assert.equal(result.body.maxInterval, 9);
   result = await json('/settings');
   assert.deepEqual(result.body.couriers, ['JNE', 'SiCepat']);
+
+  result = await json('/settings', { method: 'POST', body: JSON.stringify({ shippingPdfName: 'tarif-ongkir.pdf', shippingPdfContent: 'JVBERi0xLjQ=', shippingPdfMime: 'application/pdf', shippingPdfSize: 42 }) });
+  assert.equal(result.body.shippingPdfName, 'tarif-ongkir.pdf');
+  assert.equal(result.body.shippingPdfSize, 42);
+  result = await json('/settings');
+  assert.equal(result.body.shippingPdfName, 'tarif-ongkir.pdf');
+  assert.equal(result.body.shippingPdfSize, 42);
+  assert.equal(result.body.shippingPdfContent, undefined, 'settings response must not expose PDF content');
   assert.equal(result.body.rotation, 'Random (Acak)');
   result = await json('/settings', { method: 'POST', body: JSON.stringify({ minInterval: 5, maxInterval: 1 }) });
   assert.equal(result.body.maxInterval, 5, 'maxInterval must not drop below minInterval');
