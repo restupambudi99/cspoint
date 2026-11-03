@@ -1,111 +1,306 @@
 const content = document.querySelector('#page-content');
-const title = document.querySelector('#page-title');
-const description = document.querySelector('#page-description');
-const escapeHtml = (value) => String(value).replace(/[&<>\"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[char]));
+const titleEl = document.querySelector('#page-title');
+const descriptionEl = document.querySelector('#page-description');
+
+const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+
+async function api(path, options = {}) {
+  const response = await fetch(`/api/whatsapp/${path}`, {
+    cache: 'no-store',
+    ...options,
+    headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+const post = body => ({ method: 'POST', body: JSON.stringify(body) });
+
+function notify(element, message, kind = 'info') {
+  if (!element) return;
+  element.textContent = message;
+  element.dataset.kind = kind;
+}
+
+function section(heading, intro, body, action = '') {
+  return `<section class="section"><div class="section-head"><div><h2>${esc(heading)}</h2>${intro ? `<p class="intro">${esc(intro)}</p>` : ''}</div>${action}</div>${body}</section>`;
+}
+
+/* ---------------------------------------------------------------- Pengaturan */
 
 function settingsPage() {
-  content.innerHTML = `
-    <section class="section">
-      <div class="section-head"><div><h2>Nomor WhatsApp (Instance)</h2><p class="intro">Hubungkan nomor lewat scan QR. Beberapa instance aktif dipakai bergantian.</p></div><span class="quota">0 / 10 nomor</span></div>
-      <div class="section-actions"><button class="button" type="button" data-action="add-instance">Tambah</button></div>
-      <div class="empty"><strong>Belum ada instance</strong><span>Tambah instance lalu scan QR dari WhatsApp di HP</span></div>
-    </section>
-    <section class="section"><h2>Pengaturan Interval</h2><p class="intro">Atur rentang interval acak untuk pengiriman pesan</p>
-      <div class="form-grid"><div class="field"><label for="min-interval">Interval Minimum <span class="range-value" id="min-value">2</span> detik</label><input id="min-interval" class="range" type="range" min="1" max="60" value="2"></div><div class="field"><label for="max-interval">Interval Maksimum <span class="range-value" id="max-value">5</span> detik</label><input id="max-interval" class="range" type="range" min="1" max="60" value="5"></div><p class="hint">Interval acak antara <span id="hint-min">2</span> - <span id="hint-max">5</span> detik antar pesan untuk menghindari spam detection</p><div class="field"><label for="rotation">Mode Rotasi Nomor</label><select id="rotation"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select><span class="hint">Pesan akan dikirim bergantian ke setiap nomor aktif</span></div></div>
-      <h2 class="subheading">Waktu Operasional</h2><p class="intro">Atur jam dan hari kerja untuk pengiriman pesan</p><div class="switch-row"><div class="switch-copy"><strong>Aktifkan Batas Waktu</strong><span>Pesan hanya dikirim dalam waktu yang ditentukan</span></div><label class="switch"><input type="checkbox" id="schedule"><span class="track"></span></label></div><div class="section-actions"><button class="button" type="button" data-action="save-settings">Simpan Pengaturan</button></div>
-    </section>
-    <section class="section"><h2>Ekspedisi Cek Ongkir</h2><p class="intro">AI hanya menghitung dan menawarkan ekspedisi yang dicentang.</p><div class="checks">${['JNE','J&T Express','SiCepat','AnterAja','POS Indonesia','TIKI','Ninja Xpress','Lion Parcel','ID Express','SAP Express','Wahana'].map((x) => `<label class="check"><input type="checkbox">${x}</label>`).join('')}</div><div class="switch-row"><div class="switch-copy"><strong>Tampilkan 1 tarif termurah saja</strong><span>Pembeli tidak perlu memilih kurir. Daftar ekspedisi hanya muncul jika pembeli menanyakannya.</span></div><label class="switch"><input type="checkbox"><span class="track"></span></label></div><div class="section-actions"><button class="button" type="button" data-action="save-shipping">Simpan Ekspedisi</button></div></section>
-    <section class="section"><h2>Pesan Masuk</h2><p class="intro">Hubungkan balasan pelanggan agar otomatis muncul di Kotak Masuk.</p><div class="switch-row"><div class="switch-copy"><strong>Siap diaktifkan</strong><span>Otomatis aktif saat Scan QR. Klik lagi jika pesan masuk tidak muncul.</span></div><button class="button" type="button" data-action="activate-inbox">Aktifkan</button></div></section>`;
-  bindSettings();
+  content.innerHTML = [
+    section('Nomor WhatsApp (Instance)', 'Satu nomor WhatsApp per gateway. Status di bawah dibaca langsung dari server.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat status koneksi…</p></div>'),
+    section('Pengaturan Interval', 'Jeda antar pesan otomatis. Disimpan di database server.', `
+      <div class="form-grid">
+        <label class="field">Minimum (detik)<input id="set-min" type="number" min="1" max="600" value="2"></label>
+        <label class="field">Maksimum (detik)<input id="set-max" type="number" min="1" max="600" value="5"></label>
+        <label class="field">Rotasi<select id="set-rotation"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select></label>
+      </div>
+      <div class="section-actions"><button class="button" data-save-settings>Simpan Pengaturan</button><p role="status" id="settings-result" class="hint"></p></div>`),
+    section('Ekspedisi Cek Ongkir', 'Ekspedisi yang dipakai saat menghitung ongkir.', `
+      <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}">${esc(name)}</label>`).join('')}</div>
+      <div class="section-actions"><button class="button" data-save-shipping>Simpan Ekspedisi</button><p role="status" id="shipping-result" class="hint"></p></div>`),
+  ].join('');
+  loadSettings();
 }
+
+async function loadSettings() {
+  const result = document.querySelector('#settings-result');
+  try {
+    const settings = await api('settings');
+    document.querySelector('#set-min').value = settings.minInterval;
+    document.querySelector('#set-max').value = settings.maxInterval;
+    document.querySelector('#set-rotation').value = settings.rotation;
+    for (const box of document.querySelectorAll('input[name=courier]')) box.checked = (settings.couriers || []).includes(box.value);
+  } catch (error) {
+    notify(result, `Gagal memuat pengaturan: ${error.message}`, 'error');
+  }
+}
+
+/* ----------------------------------------------------------------- Dashboard */
 
 function dashboardPage() {
-  content.innerHTML = `
-    <section class="stats" aria-label="Ringkasan pesan">
-      ${[['Total','0'],['Terkirim','0'],['Gagal','0'],['Pending','0']].map(([label, value]) => `<div class="stat"><span>${label}</span><strong>${value}</strong></div>`).join('')}
-    </section>
-    <section class="section compose"><h2>Kirim Pesan</h2><p class="intro">Kirim pesan WhatsApp ke nomor tujuan</p>
-      <div class="field"><label for="phone">Nomor WhatsApp</label><input id="phone" type="tel" placeholder="Format: 08xxx atau 628xxx (Indonesia)"></div>
-      <div class="field"><label for="message">Pesan</label><textarea id="message" rows="5"></textarea></div>
-      <div class="section-actions"><button class="button" type="button" data-action="send-message">Kirim Pesan</button></div>
-    </section>
-    <section class="section"><div class="section-head"><div><h2>Riwayat Pesan</h2><p class="intro">0 pesan total • Halaman 1 dari 1</p></div><select class="history-filter" aria-label="Filter status"><option>Semua Status</option></select></div><div class="empty"><strong>Belum ada pesan yang dikirim</strong></div></section>`;
-  content.querySelector('[data-action="send-message"]').addEventListener('click', (event) => { event.currentTarget.textContent = 'Tersimpan'; });
+  content.innerHTML = [
+    `<section class="stats">
+      <div class="stat"><span>Total percakapan</span><strong id="stat-total">–</strong></div>
+      <div class="stat"><span>Pesan terkirim</span><strong id="stat-sent">–</strong></div>
+      <div class="stat"><span>Status WhatsApp</span><strong id="stat-status">–</strong></div>
+    </section>`,
+    section('Kirim Pesan', 'Pesan dikirim lewat nomor WhatsApp yang tertaut.', `
+      <label class="field">Nomor WhatsApp<input id="phone" type="tel" placeholder="08xxx atau 628xxx"></label>
+      <label class="field">Pesan<textarea id="message" rows="5" maxlength="4000"></textarea></label>
+      <div class="section-actions"><button class="button" data-send-message>Kirim Pesan</button><p role="status" id="send-result" class="hint"></p></div>`),
+  ].join('');
+  api('status').then(result => { document.querySelector('#stat-status').textContent = result.status; }).catch(() => {});
+  api('conversations').then(items => {
+    document.querySelector('#stat-total').textContent = items.length;
+    document.querySelector('#stat-sent').textContent = items.filter(item => item.outgoing).length;
+  }).catch(() => {});
 }
+
+/* ------------------------------------------------------------------ AI Agent */
 
 function aiAgentPage() {
-  content.innerHTML = `<section class="section ai-agent"><h2>AI Agent</h2><p class="intro">Atur gaya balasan AI untuk tiap nomor WhatsApp.</p><div class="tabs" role="tablist"><button class="tab active" type="button" role="tab">Pengaturan per Nomor</button><button class="tab" type="button" role="tab">Pembayaran</button><button class="tab" type="button" role="tab">Data Live</button><button class="tab" type="button" role="tab">Virtual Office</button></div><div class="empty"><strong>Belum ada nomor WhatsApp.</strong><span>Tambahkan instance di Pengaturan terlebih dahulu.</span></div></section>`;
-  content.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => { content.querySelectorAll('.tab').forEach((item) => item.classList.remove('active')); tab.classList.add('active'); }));
+  content.innerHTML = section('AI Agent', 'Balasan otomatis per nomor dan sumber pengetahuan.', `
+    <div class="tabs">
+      <button class="tab active" data-ai-tab="agent">Pengaturan per Nomor</button>
+      <button class="tab" data-ai-tab="knowledge">Knowledge PDF</button>
+      <button class="tab" data-ai-tab="live">Data Live</button>
+    </div>
+    <div id="ai-panel"><p class="empty">Memuat…</p></div>`);
+  drawAgent();
 }
 
-function inboxPage() {
-  content.innerHTML = `<section class="inbox-layout"><div class="conversation-list"><div class="list-head"><h2>Kotak Masuk</h2><span>0 percakapan</span></div><button class="reset-link" type="button">Reset semua</button><div class="empty compact"><strong>Belum ada percakapan</strong><span>Pesan WhatsApp masuk akan muncul di sini.</span></div></div><div class="conversation-empty"><strong>Pilih percakapan</strong><span>Pilih kontak di sebelah kiri untuk melihat dan membalas pesan.</span></div></section>`;
+async function drawAgent() {
+  const panel = document.querySelector('#ai-panel');
+  if (!panel) return;
+  try {
+    const agent = await api('agent?instance=default');
+    panel.innerHTML = `
+      <div class="form-grid">
+        <label class="field">Nama asisten<input id="agent-name" value="${esc(agent.assistantName)}" maxlength="60"></label>
+        <label class="field full">Instruksi<textarea id="agent-instructions" rows="6" maxlength="8000">${esc(agent.instructions)}</textarea></label>
+        <label class="check"><input id="agent-enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Aktifkan AI Agent</label>
+      </div>
+      <div class="section-actions"><button class="button" data-save-agent>Simpan Agent</button><p role="status" id="agent-result" class="hint"></p></div>
+      <p class="hint">Catatan: konfigurasi tersimpan di server, tetapi mesin balasan AI belum dijalankan oleh gateway.</p>`;
+  } catch (error) {
+    panel.innerHTML = `<p class="empty">Gagal memuat agent: ${esc(error.message)}</p>`;
+  }
 }
 
-function ordersPage() {
-  content.innerHTML = `<section class="section"><h2>Pesanan</h2><p class="intro">Pesanan yang dicatat AI dari chat WhatsApp, dikelompokkan berdasarkan status pengerjaan.</p><div class="status-tabs">${['Semua','Menunggu Bayar','Diproses','Selesai'].map((x) => `<button type="button" class="tab ${x === 'Semua' ? 'active' : ''}">${x} (0)</button>`).join('')}</div><button class="reset-link" type="button">Reset semua pesanan</button><div class="order-filters">${['Semua jenis','Ekspedisi','Kurir Toko','Kurir Instan','Ambil di Toko','Digital'].map((x) => `<button type="button" class="filter">${x} (0)</button>`).join('')}</div><div class="empty"><strong>Belum ada pesanan.</strong></div></section><section class="section"><h2>Template Pesan Resi</h2><p class="intro">Gunakan {nama}, {produk}, {qty}, {kurir}, {resi}, {total}, {alamat}.</p><textarea class="template-input" rows="4">Halo Kak {nama}, pesanan {produk} ({qty}) sudah dikirim via {kurir} dengan nomor resi: {resi}. Mohon ditunggu kedatangannya ya Kak, terima kasih!</textarea><div class="section-actions"><button class="button" type="button" data-action="save-template">Simpan Template</button></div></section>`;
-  content.querySelector('[data-action="save-template"]').addEventListener('click', (event) => { event.currentTarget.textContent = 'Tersimpan'; });
+async function knowledgePanel() {
+  const panel = document.querySelector('#ai-panel');
+  if (!panel) return;
+  try {
+    const items = await api('knowledge');
+    panel.innerHTML = `
+      <form id="knowledge-form" class="form-grid">
+        <label class="field">Nama dokumen<input id="knowledge-name" required maxlength="160"></label>
+        <label class="field full">Isi teks hasil ekstraksi PDF<textarea id="knowledge-content" rows="6" required maxlength="200000"></textarea></label>
+        <div class="section-actions"><button class="button" type="submit">Simpan Knowledge</button><p role="status" id="knowledge-result" class="hint"></p></div>
+      </form>
+      <div class="list">${items.map(item => `<article class="contact-row"><strong>${esc(item.name)}</strong><span>${esc(item.status)}</span><span>${esc(item.size)} karakter</span><button class="button secondary" data-domain-delete="knowledge/${esc(item.id)}">Hapus</button></article>`).join('') || '<p class="empty">Belum ada knowledge.</p>'}</div>`;
+  } catch (error) {
+    panel.innerHTML = `<p class="empty">Gagal memuat knowledge: ${esc(error.message)}</p>`;
+  }
 }
 
-function productsPage() {
-  content.innerHTML = `<section class="section product-empty"><p class="placeholder">Aktif</p></section>`;
+function livePanel() {
+  const panel = document.querySelector('#ai-panel');
+  if (!panel) return;
+  panel.innerHTML = `<p class="empty">Data live belum tersedia. Gateway belum menyimpan metrik percakapan AI.</p>`;
 }
 
-function contactsPage() {
-  const contacts = JSON.parse(localStorage.getItem('niaw-contacts') || '[]'); const rows = contacts.map((contact) => `<div class="contact-row"><input type="checkbox"><span class="avatar">${escapeHtml(contact.name.charAt(0).toUpperCase())}</span><strong>${escapeHtml(contact.name)}</strong><span>${escapeHtml(contact.phone)}</span><span>${escapeHtml(contact.note || 'cs')}</span><span class="follow-up-buttons">${[1,2,3,4,5].map((n) => `<button type="button">✈ ${n}</button>`).join('')}</span><button type="button" aria-label="Menu kontak">…</button></div>`).join('');
-  content.innerHTML = `<section class="section contacts"><div class="section-head"><div><h2>Kontak WhatsApp</h2><p class="intro">Kelola kontak dan kirim follow up dengan satu klik</p></div><div class="contact-actions"><button class="button secondary" type="button" data-contact-action="groups">Kelola Grup</button><button class="button" type="button" data-contact-action="import">Import Excel</button><button class="button" type="button" data-contact-action="add">Tambah Kontak</button></div></div><div class="contact-total"><span>Total</span><strong>${contacts.length}</strong></div><div class="fu-grid">${[1,2,3,4,5].map((n) => `<div class="fu-card"><span>FU${n}</span><strong>0%</strong><small>0 / ${contacts.length}</small></div>`).join('')}</div><div class="list-head contact-list-head"><div><h2>Daftar Kontak</h2><span>${contacts.length} kontak</span></div><div class="contact-filters"><select aria-label="Filter grup"><option>Semua Grup</option></select><select aria-label="Filter kontak"><option>Semua Kontak</option></select><input type="search" placeholder="Cari nama atau nomor..." aria-label="Cari nama atau nomor"></div></div><label class="select-all"><input type="checkbox"> Pilih Semua</label><label class="per-page">Tampilkan <select aria-label="Jumlah kontak"><option>25</option></select> kontak</label>${contacts.length ? `<div class="contact-table"><div class="contact-table-head"><span>Nama</span><span>Nomor WA</span><span>Catatan</span><span>Follow Up</span></div>${rows}</div>` : '<div class="empty"><strong>Belum ada kontak</strong><span>Tambahkan kontak baru atau import dari CSV.</span></div>'}</section>`;
-  content.querySelectorAll('[data-contact-action]').forEach((button) => button.addEventListener('click', () => openContactModal(button.dataset.contactAction)));
+/* --------------------------------------------------------------- Data domain */
+
+const domainConfig = {
+  products: { label: 'Produk', intro: 'Katalog persisten untuk AI Agent dan pesanan.', fields: [{ key: 'name', label: 'Nama produk', required: true }, { key: 'sku', label: 'SKU' }, { key: 'price', label: 'Harga', type: 'number' }, { key: 'stock', label: 'Stok', type: 'number' }] },
+  orders: { label: 'Pesanan', intro: 'Simpan dan lacak pesanan pelanggan.', fields: [{ key: 'customer', label: 'Nama pelanggan', required: true }, { key: 'phone', label: 'Nomor WhatsApp' }, { key: 'total', label: 'Total', type: 'number' }] },
+  forms: { label: 'Form Builder', intro: 'Buat form dengan field dan simpan di server.', fields: [{ key: 'name', label: 'Nama form', required: true }] },
+  contacts: { label: 'Kontak', intro: 'Daftar kontak pelanggan.', fields: [{ key: 'name', label: 'Nama kontak', required: true }, { key: 'phone', label: 'Nomor WhatsApp' }, { key: 'tag', label: 'Tag' }] },
+  templates: { label: 'Template FU', intro: 'Template follow up yang bisa dipakai ulang.', fields: [{ key: 'name', label: 'Nama template', required: true }, { key: 'stage', label: 'Tahap' }, { key: 'body', label: 'Isi pesan', type: 'textarea' }] },
+};
+
+function domainPage(kind) {
+  const config = domainConfig[kind];
+  const fields = config.fields.map(field => field.type === 'textarea'
+    ? `<label class="field full">${esc(field.label)}<textarea name="${field.key}" rows="3" maxlength="4000"></textarea></label>`
+    : `<label class="field">${esc(field.label)}${field.required ? ' *' : ''}<input name="${field.key}" type="${field.type || 'text'}" ${field.required ? 'required' : ''}></label>`).join('');
+  content.innerHTML = section(config.label, config.intro, `
+    <form class="form-grid" data-domain-form="${kind}">${fields}
+      <div class="section-actions"><button class="button" type="submit">Tambah ${esc(config.label)}</button><p role="status" id="domain-result" class="hint"></p></div>
+    </form>
+    <div id="domain-list" class="list"><p class="empty">Memuat…</p></div>`);
+  loadDomain(kind);
 }
 
-function templatesPage() {
-  const cards = [1, 2, 3, 4, 5].map((n) => `<section class="section fu-editor"><div class="fu-editor-head"><div class="fu-title"><span class="fu-badge">FU${n}</span><div><h2>Follow Up ${n}</h2><p class="intro">Belum ada deskripsi</p></div></div><div class="builder-actions"><button class="button secondary" type="button" data-fu-preview="${n}">✧ Preview</button><button class="button" type="button" data-fu-save="${n}">▣ Simpan</button></div></div><div class="fu-form-grid"><label class="field"><span>Deskripsi</span><input placeholder="Deskripsi singkat template ini..."></label><div class="field"><span>Opsi Rotator</span><div class="rotator-empty">Belum ada template</div></div></div><label class="field fu-message"><span>Template Pesan</span><textarea rows="4" placeholder="Tulis template pesan dengan word rotator..."></textarea></label></section>`).join('');
-  content.innerHTML = `<div class="templates-page"><div class="template-intro"><h2>Template Follow Up</h2><p class="intro">Kelola template pesan untuk FU1 sampai FU5 dengan word rotator</p></div><section class="section rotator-guide"><div class="guide-title"><span class="guide-icon">♧</span><div><h2>Panduan Word Rotator</h2><p class="intro">Buat pesan yang lebih personal dan unik</p></div></div><div class="guide-grid"><div><span>Format Rotator</span><code>{kata1|kata2|kata3}</code></div><div><span>Variabel Nama</span><code>{nama}</code></div><div><span>Contoh</span><code>Halo {Kak|Bro} {nama}</code></div></div></section>${cards}</div>`;
-  content.querySelectorAll('[data-fu-save]').forEach((button) => button.addEventListener('click', () => { button.textContent = 'Tersimpan'; setTimeout(() => { button.textContent = '▣ Simpan'; }, 1200); }));
-  content.querySelectorAll('[data-fu-preview]').forEach((button) => button.addEventListener('click', () => { button.textContent = 'Preview aktif'; setTimeout(() => { button.textContent = '✧ Preview'; }, 1200); }));
+async function loadDomain(kind) {
+  const list = document.querySelector('#domain-list');
+  if (!list) return;
+  try {
+    const items = await api(kind);
+    list.innerHTML = items.length
+      ? items.map(item => `<article class="contact-row"><strong>${esc(item.name || item.customer || item.label)}</strong><span>${esc(item.status || item.sku || item.stage || item.tag || item.phone || '')}</span><button class="button secondary" data-domain-delete="${kind}/${esc(item.id)}">Hapus</button></article>`).join('')
+      : '<p class="empty">Belum ada data.</p>';
+  } catch (error) {
+    list.innerHTML = `<p class="empty">Gagal memuat data: ${esc(error.message)}</p>`;
+  }
 }
 
-function openContactModal(action) {
-  const copy = action === 'add' ? ['Tambah Kontak', '<label class="field"><span>Nama</span><input data-contact-name placeholder="Nama kontak"></label><label class="field"><span>Nomor WhatsApp</span><input data-contact-phone placeholder="628xxx"></label>'] : action === 'import' ? ['Import Excel', '<label class="upload-box"><input type="file" accept=".xlsx,.xls,.csv" hidden><span>Pilih file Excel atau CSV</span><small>Data akan diproses secara lokal</small></label>'] : ['Kelola Grup', '<label class="field"><span>Nama Grup</span><input placeholder="Nama grup"></label>'];
-  const modal = document.createElement('div'); modal.className = 'modal-backdrop'; modal.innerHTML = `<div class="modal contact-modal"><button class="modal-close" type="button" aria-label="Close">×</button><h2>${copy[0]}</h2>${copy[1]}<div class="modal-actions"><button class="button secondary" type="button" data-cancel>Batal</button><button class="button" type="button" data-confirm>Simpan</button></div></div>`; document.body.append(modal); const close = () => modal.remove(); modal.querySelector('[data-cancel]').addEventListener('click', close); modal.querySelector('.modal-close').addEventListener('click', close); modal.querySelector('[data-confirm]').addEventListener('click', () => { if (action === 'add') { const name = modal.querySelector('[data-contact-name]').value.trim(); const phone = modal.querySelector('[data-contact-phone]').value.trim(); if (!name || !phone) return; const contacts = JSON.parse(localStorage.getItem('niaw-contacts') || '[]'); contacts.push({name, phone, note: 'cs'}); localStorage.setItem('niaw-contacts', JSON.stringify(contacts)); close(); contactsPage(); } else close(); });
+const ordersPage = () => domainPage('orders');
+const productsPage = () => domainPage('products');
+const formsPage = () => domainPage('forms');
+const contactsPage = () => domainPage('contacts');
+const templatesPage = () => domainPage('templates');
+
+function accountPage() {
+  content.innerHTML = section('Akun & Langganan', 'Paket, kuota, dan profil toko.', '<p class="empty">Belum tersedia. Billing dan kuota belum diimplementasikan di gateway ini.</p>');
 }
 
-function formsPage() {
-  content.innerHTML = `<section class="section forms"><div class="section-head"><div><h2>Form Builder</h2><p class="intro">Buat dan kelola form kustom seperti Google Forms</p></div><span class="status-label">Aktif</span></div><div class="section-actions"><button class="button" type="button" data-open-form>Buat Form Baru</button></div><h2 class="subheading">Daftar Form</h2><p class="intro">Semua form yang telah dibuat. Klik untuk mengedit atau melihat submissions.</p><div class="empty"><span>Memuat data...</span></div></section>`;
-  content.querySelector('[data-open-form]').addEventListener('click', openFormModal);
+/* -------------------------------------------------------------------- Router */
+
+const pages = {
+  Pengaturan: settingsPage,
+  Dashboard: dashboardPage,
+  'AI Agent': aiAgentPage,
+  Pesanan: ordersPage,
+  Produk: productsPage,
+  'Form Builder': formsPage,
+  Kontak: contactsPage,
+  'Template FU': templatesPage,
+  'Akun & Langganan': accountPage,
+};
+
+function render() {
+  const hash = location.hash || '#settings';
+  const link = document.querySelector(`.nav a[href="${hash}"]`) || document.querySelector('.nav a[href="#settings"]');
+  document.querySelectorAll('.nav a').forEach(item => item.classList.toggle('active', item === link));
+  titleEl.textContent = link.dataset.page;
+  descriptionEl.textContent = link.dataset.description;
+  const page = pages[link.dataset.page];
+  if (page) { page(); return; }
+  if (link.dataset.page === 'Kotak Masuk') {
+    content.innerHTML = '<section class="section"><h2>Kotak Masuk</h2><p class="empty">Memuat percakapan…</p></section>';
+    return;
+  }
+  content.innerHTML = section(link.dataset.page, '', '<p class="empty">Menu belum tersedia.</p>');
 }
 
-function openFormModal() {
-  const modal = document.createElement('div');
-  modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="new-form-title"><button class="modal-close" type="button" aria-label="Close">×</button><h2 id="new-form-title">Buat Form Baru</h2><p class="intro">Masukkan nama dan deskripsi untuk form baru Anda</p><div class="template-choice"><span>Template</span><button class="choice active" type="button"><strong>Form Biasa</strong><small>Pendaftaran, survei, event</small></button><button class="choice" type="button"><strong>Formulir Order</strong><small>Katalog produk, ongkir & total otomatis</small></button></div><div class="field"><label for="new-form-name">Nama Form</label><input id="new-form-name" placeholder="Contoh: Form Pendaftaran"></div><div class="field"><label for="new-form-description">Deskripsi (opsional)</label><input id="new-form-description" placeholder="Deskripsi singkat tentang form ini"></div><div class="modal-actions"><button class="button secondary" type="button" data-cancel-form>Batal</button><button class="button" type="button" data-create-form>Buat Form</button></div></div>`;
-  document.body.append(modal);
-  modal.querySelectorAll('.choice').forEach((choice) => choice.addEventListener('click', () => { modal.querySelectorAll('.choice').forEach((item) => item.classList.remove('active')); choice.classList.add('active'); }));
-  modal.querySelector('[data-cancel-form]').addEventListener('click', () => modal.remove());
-  modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
-  modal.querySelector('[data-create-form]').addEventListener('click', () => { modal.remove(); history.pushState({}, '', '/forms/local/builder'); renderPage(); });
-  modal.querySelector('#new-form-name').focus();
-}
+content.addEventListener('click', async event => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  const result = document.querySelector('#domain-result');
+  try {
+    if (button.matches('[data-save-settings]')) {
+      const target = document.querySelector('#settings-result');
+      button.disabled = true;
+      try {
+        const saved = await api('settings', post({
+          minInterval: Number(document.querySelector('#set-min').value),
+          maxInterval: Number(document.querySelector('#set-max').value),
+          rotation: document.querySelector('#set-rotation').value,
+        }));
+        notify(target, `Tersimpan: interval ${saved.minInterval}–${saved.maxInterval} detik, ${saved.rotation}.`, 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-save-shipping]')) {
+      const target = document.querySelector('#shipping-result');
+      button.disabled = true;
+      try {
+        const saved = await api('settings', post({ couriers: [...document.querySelectorAll('input[name=courier]:checked')].map(box => box.value) }));
+        notify(target, `Tersimpan: ${saved.couriers.length} ekspedisi.`, 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-send-message]')) {
+      const target = document.querySelector('#send-result');
+      button.disabled = true;
+      try {
+        const sent = await api('send', post({ phone: document.querySelector('#phone').value, text: document.querySelector('#message').value }));
+        notify(target, `Pesan diserahkan ke WhatsApp (${sent.status}).`, 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-ai-tab]')) {
+      document.querySelectorAll('[data-ai-tab]').forEach(tab => tab.classList.toggle('active', tab === button));
+      const tab = button.dataset.aiTab;
+      if (tab === 'knowledge') knowledgePanel();
+      else if (tab === 'live') livePanel();
+      else drawAgent();
+    }
+    if (button.matches('[data-save-agent]')) {
+      const target = document.querySelector('#agent-result');
+      button.disabled = true;
+      try {
+        const saved = await api('agent', post({
+          instance: 'default',
+          assistantName: document.querySelector('#agent-name').value,
+          instructions: document.querySelector('#agent-instructions').value,
+          enabled: document.querySelector('#agent-enabled').checked,
+        }));
+        notify(target, `Tersimpan: ${saved.assistantName} (${saved.enabled ? 'aktif' : 'nonaktif'}).`, 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-domain-delete]')) {
+      button.disabled = true;
+      const [kind, id] = button.dataset.domainDelete.split('/');
+      await api(`${kind}/${id}`, { method: 'DELETE' });
+      if (kind === 'knowledge') knowledgePanel(); else loadDomain(kind);
+    }
+  } catch (error) {
+    const target = document.querySelector('#domain-result') || document.querySelector('#settings-result') || document.querySelector('#send-result') || document.querySelector('#agent-result') || document.querySelector('#knowledge-result');
+    notify(target, error.message, 'error');
+    if (!target) alert(error.message);
+    button.disabled = false;
+  }
+});
 
-function builderPage() {
-  const saved = JSON.parse(localStorage.getItem('niaw-form-builder') || '{}');
-  const name = escapeHtml(saved.name || 'tes'); const slug = escapeHtml(saved.slug || 'tes-vge1'); const formDescription = escapeHtml(saved.description || 'tes'); const date = escapeHtml(saved.date || ''); const link = escapeHtml(saved.link || '');
-  content.innerHTML = `<section class="builder-page"><div class="builder-head"><div><h2>Form Builder</h2><p class="intro">Edit dan konfigurasi form Anda</p></div><div class="builder-actions"><button class="button secondary" type="button" data-preview>Preview</button><button class="button" type="button" data-save>Simpan</button></div></div><section class="section"><h2>Pengaturan Form</h2><p class="intro">Nama dan deskripsi form</p><div class="form-grid builder-grid"><div class="field"><label for="builder-name">Nama Form</label><input id="builder-name" value="${name}"></div><div class="field"><label for="builder-slug">Slug URL <span class="hint-inline">(contoh: /f/tes-vge1)</span></label><input id="builder-slug" value="${slug}"></div><div class="field full"><label for="builder-description">Deskripsi</label><div class="editor-toolbar">${['Bold','Italic','Underline','Strikethrough','Heading 1','Heading 2','Heading 3','Bullet List','Numbered List','Quote','Code','Link','Undo','Redo'].map((x) => `<button type="button" title="${x}" ${x === 'Redo' ? 'disabled' : ''}>${x}</button>`).join('')}</div><textarea id="builder-description" rows="3">${formDescription}</textarea></div><div class="field"><label for="event-date">Tanggal Event (Opsional)</label><input id="event-date" type="datetime-local" value="${date}"></div><div class="field"><label for="event-link">Link Event (Opsional)</label><input id="event-link" placeholder="https://zoom.us/j/..." type="url" value="${link}"></div><div class="field full"><label>Banner Form</label><div class="upload-box" role="button" tabindex="0">Klik untuk upload banner<span>Max 5MB (JPG, PNG, GIF)</span></div></div><div class="field full"><h3>Nomor WhatsApp Pengirim</h3><p class="hint">Pesan terima kasih dan reminder form ini dikirim dari nomor CS yang dipilih. Balasan peserta masuk ke CS yang sama.</p><select><option>Otomatis (nomor aktif pertama)</option></select></div><div class="field full"><h3>Pesan Terima Kasih Otomatis</h3><p class="hint">Kirim pesan WhatsApp otomatis setelah form di-submit</p><label class="switch-row"><span>Aktifkan pesan terima kasih via WhatsApp</span><span class="switch"><input type="checkbox"><span class="track"></span></span></label></div><div class="field full"><h3>Reminder Event</h3><p class="hint">Kirim pengingat WA otomatis sebelum event dimulai</p><p class="warning">Atur Tanggal Event terlebih dahulu untuk mengaktifkan fitur reminder.</p><label class="switch-row disabled"><span>Aktifkan reminder otomatis</span><span class="switch"><input type="checkbox" disabled><span class="track"></span></span></label></div><div class="field full field-form"><div class="section-head"><div><h3>Field Form</h3><p class="hint">Tambah dan atur field untuk form Anda</p></div><button class="button" type="button" data-add-field>Tambah Field</button></div><div class="empty"><span>Belum ada field. Klik tombol di atas untuk menambahkan.</span></div></div></div></section></section>`;
-  content.querySelector('[data-add-field]').addEventListener('click', () => { const empty = content.querySelector('.field-form .empty'); empty.className = 'field-row'; empty.innerHTML = '<span class="drag-handle" aria-hidden="true">⋮⋮</span><label class="field"><span>Tipe Field</span><select><option>Teks Singkat</option><option>Teks Panjang</option><option>Angka</option><option>Email</option><option>Telepon</option><option>Dropdown</option><option>Pilihan Ganda</option><option>Checkbox</option></select></label><label class="field"><span>Label</span><input value="Field Baru"></label><label class="field"><span>Placeholder</span><input placeholder="Placeholder (opsional)"></label><label class="required-toggle"><input type="checkbox"><span>Wajib diisi</span></label><button class="delete-field" type="button" aria-label="Hapus field">⌫</button>'; const type = empty.querySelector('select'); const syncOptions = () => { empty.querySelector('.options-config')?.remove(); if (['Dropdown','Pilihan Ganda'].includes(type.value)) { const options = document.createElement('label'); options.className = 'field options-config'; options.innerHTML = '<span>Opsi</span><input placeholder="Pisahkan opsi dengan koma">'; empty.insertBefore(options, empty.querySelector('.required-toggle')); } }; type.addEventListener('change', syncOptions); empty.querySelector('.delete-field').addEventListener('click', () => { empty.className = 'empty'; empty.innerHTML = '<span>Belum ada field. Klik tombol di atas untuk menambahkan.</span>'; }); });
-  const uploadBox = content.querySelector('.upload-box'); const bannerFile = document.createElement('input'); bannerFile.type = 'file'; bannerFile.accept = 'image/jpeg,image/png,image/gif'; bannerFile.hidden = true; uploadBox.append(bannerFile); uploadBox.addEventListener('click', () => bannerFile.click()); bannerFile.addEventListener('change', () => { const file = bannerFile.files[0]; if (!file) return; const ok = ['image/jpeg', 'image/png', 'image/gif'].includes(file.type) && file.size <= 5 * 1024 * 1024; uploadBox.dataset.error = ok ? '' : 'true'; uploadBox.firstChild.textContent = ok ? file.name : 'File harus JPG, PNG, atau GIF maksimal 5MB'; if (!ok) bannerFile.value = ''; });
-  content.querySelector('[data-save]').addEventListener('click', (event) => { localStorage.setItem('niaw-form-builder', JSON.stringify({ name: document.querySelector('#builder-name').value, slug: document.querySelector('#builder-slug').value, description: document.querySelector('#builder-description').value, date: document.querySelector('#event-date').value, link: document.querySelector('#event-link').value })); event.currentTarget.textContent = 'Tersimpan'; });
-  content.querySelector('[data-preview]').addEventListener('click', () => { const fields = [...content.querySelectorAll('.field-row')].map((row) => { const inputs = row.querySelectorAll('input'); return `<div class="preview-field"><label>${escapeHtml(inputs[0]?.value || 'Field')}</label><input placeholder="${escapeHtml(inputs[1]?.placeholder || 'Jawaban Anda')}" ${inputs[0]?.type === 'checkbox' ? 'type="checkbox"' : ''}></div>`; }).join('') || '<p class="hint">Belum ada field.</p>'; const modal = document.createElement('div'); modal.className = 'modal-backdrop'; modal.innerHTML = `<div class="modal preview-modal"><button class="modal-close" type="button" aria-label="Close">×</button><h2>${escapeHtml(document.querySelector('#builder-name').value)}</h2><p class="intro">${escapeHtml(document.querySelector('#builder-description').value)}</p>${fields}<button class="button" type="button">Kirim</button></div>`; document.body.append(modal); modal.querySelector('.modal-close').addEventListener('click', () => modal.remove()); });
-}
+content.addEventListener('submit', async event => {
+  const form = event.target;
+  if (form.matches('#knowledge-form')) {
+    event.preventDefault();
+    const target = document.querySelector('#knowledge-result');
+    try {
+      await api('knowledge', post({ name: document.querySelector('#knowledge-name').value, content: document.querySelector('#knowledge-content').value, mime: 'text/plain' }));
+      await knowledgePanel();
+      notify(document.querySelector('#knowledge-result'), 'Knowledge tersimpan.', 'ok');
+    } catch (error) { notify(target, error.message, 'error'); }
+    return;
+  }
+  if (form.matches('[data-domain-form]')) {
+    event.preventDefault();
+    const kind = form.dataset.domainForm;
+    const payload = {};
+    for (const [key, value] of new FormData(form)) payload[key] = value;
+    try {
+      await api(kind, post(payload));
+      form.reset();
+      await loadDomain(kind);
+      notify(document.querySelector('#domain-result'), 'Data tersimpan di server.', 'ok');
+    } catch (error) { notify(document.querySelector('#domain-result'), error.message, 'error'); }
+  }
+});
 
-function bindSettings() {
-  const min = document.querySelector('#min-interval'); const max = document.querySelector('#max-interval');
-  const sync = () => { document.querySelector('#min-value').textContent = min.value; document.querySelector('#max-value').textContent = max.value; document.querySelector('#hint-min').textContent = min.value; document.querySelector('#hint-max').textContent = max.value; };
-  min.addEventListener('input', sync); max.addEventListener('input', sync);
-  content.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => { button.textContent = 'Tersimpan'; setTimeout(() => { button.textContent = button.dataset.action === 'activate-inbox' ? 'Aktifkan' : button.dataset.action === 'add-instance' ? 'Tambah' : button.dataset.action === 'save-shipping' ? 'Simpan Ekspedisi' : 'Simpan Pengaturan'; }, 1200); }));
-}
-
-function renderPage() { if (location.pathname.includes('/forms/') && location.pathname.endsWith('/builder')) { title.textContent = 'Dashboard'; description.textContent = ''; document.querySelectorAll('.nav a').forEach((a) => a.classList.remove('active')); builderPage(); return; } const active = document.querySelector(`.nav a[href="${location.hash || '#settings'}"]`) || document.querySelector('.nav a[href="#settings"]'); document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a === active)); title.textContent = active.dataset.page; description.textContent = active.dataset.description; const enterprise = document.querySelector('.enterprise'); enterprise.textContent = ['Template FU', 'Akun & Langganan'].includes(active.dataset.page) ? 'Aktif' : 'Paket Enterprise'; enterprise.href = active.dataset.page === 'Akun & Langganan' ? '#account' : '#account'; if (active.dataset.page === 'Pengaturan') settingsPage(); else if (active.dataset.page === 'Dashboard') dashboardPage(); else if (active.dataset.page === 'AI Agent') aiAgentPage(); else if (active.dataset.page === 'Kotak Masuk') inboxPage(); else if (active.dataset.page === 'Pesanan') ordersPage(); else if (active.dataset.page === 'Produk') productsPage(); else if (active.dataset.page === 'Kontak') contactsPage(); else if (active.dataset.page === 'Form Builder') formsPage(); else if (active.dataset.page === 'Template FU') templatesPage(); else if (active.dataset.page === 'Akun & Langganan') content.innerHTML = ''; else content.innerHTML = `<section class="section"><h2>${active.dataset.page}</h2><p class="placeholder">${active.dataset.description}</p></section>`; }
-document.querySelectorAll('.nav a, .brand, .enterprise').forEach((link) => link.addEventListener('click', () => setTimeout(renderPage, 0)));
-window.addEventListener('hashchange', renderPage);
-window.addEventListener('popstate', renderPage);
-document.querySelector('#logout').addEventListener('click', () => { document.querySelector('#logout').textContent = 'Logout'; });
-renderPage();
+document.querySelectorAll('.nav a').forEach(link => link.addEventListener('click', () => setTimeout(render, 0)));
+addEventListener('hashchange', render);
+render();

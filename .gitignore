@@ -1,0 +1,20 @@
+# Runtime secrets and state — never commit
+.env
+*.env
+node_modules/
+session/
+test-session/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+
+# Local tooling and one-off audit scripts (not part of the product)
+.hallmark/
+opencode.json
+opencode.json.before-mycopilot-fix
+repair-provider.cjs
+inspect-mycopilot*.mjs
+extract-mycopilot*.mjs
+browser-round-*.mjs
+browser-login.mjs

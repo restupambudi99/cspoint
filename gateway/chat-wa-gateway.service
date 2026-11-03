@@ -1,0 +1,26 @@
+[Unit]
+Description=Chat WA Bot QR gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=chat-wa
+Group=chat-wa
+WorkingDirectory=/opt/chat-wa-gateway
+EnvironmentFile=/etc/chat-wa-gateway.env
+Environment=SESSION_DIR=/var/lib/chat-wa-gateway/session
+Environment=MESSAGE_DB=/var/lib/chat-wa-gateway/messages.sqlite
+ExecStart=/usr/local/bin/node /opt/chat-wa-gateway/server.mjs
+Restart=on-failure
+RestartSec=10
+StateDirectory=chat-wa-gateway
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+MemoryMax=384M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

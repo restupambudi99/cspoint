@@ -1,17 +1,17 @@
 /* Hallmark · v2.0.0 · Niaw settings reconstruction · modern-minimal · functional dashboard shell */
 /* Critique: preserve the observed information hierarchy; no invented data or decorative UI. */
 :root {
-  --bg: #f7f8fb;
+  --bg: #fff9f5;
   --surface: #ffffff;
   --white: #ffffff;
   --ink: #172033;
   --muted: #5f6878;
   --line: #e6e9ef;
-  --brand: #075e54;
-  --accent: #128c7e;
-  --accent-soft: #e5f6f1;
+  --brand: #c54809;
+  --accent: #c54809;
+  --accent-soft: #fff0e6;
   --danger: #b44949;
-  --button-hover: #064c44;
+  --button-hover: #a83b06;
   --notice-bg: #fff8e7;
   --notice-ink: #805c16;
   --focus: #9cdecf;
@@ -40,6 +40,11 @@ a { color: inherit; text-decoration: none; }
 .nav a { display: block; border-radius: 9px; color: var(--muted); padding: 11px 14px; transition: background-color .16s ease, color .16s ease; }
 .nav a:hover, .nav a:focus-visible { color: var(--ink); background: var(--bg); }
 .nav a.active { color: var(--brand); background: var(--accent-soft); font-weight: 650; }
+.nav a::after { content: attr(data-description); display: block; font-size: 12px; font-weight: 400; margin-top: 4px; }
+.nav a.active { background: var(--brand); color: white; }
+#wa-connection { display: grid; gap: 16px; }
+#wa-connection img { max-width: 100%; }
+#wa-connection .section-actions { justify-content: flex-start; }
 .main-content { min-width: 0; }
 .topbar { display: flex; align-items: center; gap: 24px; padding: 24px 42px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .topbar > div { flex: 1; min-width: 0; }
@@ -200,3 +205,17 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .section-head { display: grid; } }
 @media (max-width: 700px) { .fu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .contact-filters { justify-content: flex-start; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; } }
+
+/* Pairing panel and server-backed form feedback */
+.pairing { display: grid; gap: 14px; justify-items: start; border: 1px solid var(--line); border-radius: 12px; margin-top: 20px; padding: 20px; }
+.pairing img { border: 1px solid var(--line); border-radius: 10px; background: var(--white); padding: 10px; }
+.status-line { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; }
+.status-line::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--empty-border); }
+.status-line[data-status="connected"]::before { background: #1f9d55; }
+.status-line[data-status="awaiting_scan"]::before, .status-line[data-status="connecting"]::before { background: #d99b1f; }
+.status-line[data-status="disconnected"]::before, .status-line[data-status="unavailable"]::before, .status-line[data-status="logged_out"]::before { background: #d64545; }
+.section-actions { flex-wrap: wrap; align-items: center; gap: 14px; }
+.section-actions .hint { margin-right: auto; }
+.hint[data-kind="ok"] { color: #1f7a45; }
+.hint[data-kind="error"] { color: #b3261e; }
+.list { display: grid; gap: 10px; margin-top: 20px; }

@@ -1,0 +1,10 @@
+tunnel: 572d57a7-cbac-4129-8563-e458b980e308
+credentials-file: /root/.cloudflared/572d57a7-cbac-4129-8563-e458b980e308.json
+protocol: http2
+
+ingress:
+  - hostname: api9router.restupambudi.my.id
+    service: http://127.0.0.1:20128
+  - hostname: chatbot.restupambudi.my.id
+    service: http://127.0.0.1:18181
+  - service: http_status:404

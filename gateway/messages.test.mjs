@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { openMessages } from './messages.mjs';
+const store = openMessages(':memory:');
+const message = { id: 'one', jid: '628123456789@s.whatsapp.net', name: '<test>', text: 'hello', timestamp: 1 };
+store.add(message); store.add(message);
+assert.equal(store.thread(message.jid).length, 1);
+store.add({ ...message, id: 'two', text: 'reply', outgoing: true, timestamp: 2 });
+assert.equal(store.list().length, 1);
+assert.equal(store.list()[0].text, 'reply');
+assert.equal(store.thread(message.jid)[1].outgoing, 1);
+assert.equal(store.thread('other').length, 0);
+store.close();
+console.log('PASS: message storage, duplicate prevention, conversation grouping and ordering');

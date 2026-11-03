@@ -1,0 +1,294 @@
+import { createServer } from 'node:http';
+import { timingSafeEqual, createHmac, randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
+import pino from 'pino';
+import QRCode from 'qrcode';
+import { openMessages } from './messages.mjs';
+import { openStore } from './store.mjs';
+import { mcpHandler } from './mcp.mjs';
+
+const token = process.env.GATEWAY_TOKEN;
+if (!token || token.length < 32) throw new Error('GATEWAY_TOKEN must contain at least 32 characters');
+const logger = pino({ level: 'silent' });
+const dbPath = process.env.MESSAGE_DB || ':memory:';
+const messages = openMessages(dbPath);
+const store = openStore(dbPath);
+const handleMcp = mcpHandler({ token: process.env.MCP_TOKEN, messages, getStatus: () => status });
+
+let status = 'idle';
+let qr = null;
+let socket = null;
+let retry = null;
+let stopping = false;
+let connectionGeneration = 0;
+let retryAttempt = 0;
+let connectedAt = null;
+let lastClose = null;
+
+const { state, saveCreds } = await useMultiFileAuthState(process.env.SESSION_DIR || './session');
+const hasSession = () => Boolean(state.creds?.me || state.creds?.registered);
+
+const loginAttempts = new Map();
+const equal = (a, b) => {
+  const left = Buffer.from(a), right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+};
+const sign = value => createHmac('sha256', token).update(value).digest('hex');
+function sessionValid(cookie = '') {
+  const value = cookie.split(';').map(x => x.trim()).find(x => x.startsWith('chat_session='))?.slice(13);
+  if (!value) return false;
+  const [expires, nonce, signature] = value.split('.');
+  return Number(expires) > Date.now() && !!nonce && !!signature && equal(sign(`${expires}.${nonce}`), signature);
+}
+
+const loginHtml = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Masuk Chat WA Bot</title><body><main><h1>Masuk Chat WA Bot</h1><p>Gunakan akun dashboard, bukan password SSH VPS.</p><form method="post" action="/login"><p><label>Username <input name="username" autocomplete="username" required value="admin"></label></p><p><label>Password <input type="password" name="password" autocomplete="current-password" required></label></p><button type="submit">Masuk dashboard</button></form></main></body></html>`;
+
+function statusPayload() {
+  return {
+    status,
+    connectedAt,
+    lastClose,
+    hasSession: hasSession(),
+    retryPending: Boolean(retry),
+  };
+}
+
+function scheduleRetry(delay) {
+  if (stopping) return;
+  clearTimeout(retry);
+  retry = setTimeout(() => { retry = null; connect(); }, delay);
+}
+
+function retire(target) {
+  try { target.ev.removeAllListeners(); } catch {}
+  try { target.end(undefined); } catch {}
+}
+
+function connect() {
+  if (stopping) return;
+  const generation = ++connectionGeneration;
+  clearTimeout(retry);
+  retry = null;
+  qr = null;
+  status = 'connecting';
+
+  let current;
+  try {
+    current = makeWASocket({ auth: state, logger, markOnlineOnConnect: false, syncFullHistory: false });
+  } catch (error) {
+    status = 'disconnected';
+    lastClose = { code: null, at: Date.now(), reason: 'socket-init-failed' };
+    console.error(`WhatsApp socket could not start: ${error?.message ?? 'unknown'}`);
+    scheduleRetry(Math.min(30000, 2000 * 2 ** retryAttempt++));
+    return;
+  }
+
+  socket = current;
+  const isCurrent = () => generation === connectionGeneration && socket === current;
+
+  current.ev.on('creds.update', () => {
+    if (!isCurrent()) return;
+    saveCreds().catch(() => console.error('Unable to persist WhatsApp credentials'));
+  });
+
+  current.ev.on('messages.upsert', ({ messages: batch }) => {
+    if (!isCurrent()) return;
+    try {
+      for (const message of batch) {
+        const jid = message.key?.remoteJid;
+        const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
+        if (!jid || !message.key?.id || !text || !jid.endsWith('@s.whatsapp.net')) continue;
+        messages.add({ id: message.key.id, jid, text, name: message.pushName || '', outgoing: message.key.fromMe, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() });
+      }
+    } catch { console.error('Unable to persist incoming messages'); }
+  });
+
+  current.ev.on('connection.update', update => {
+    // A superseded socket must never overwrite the state owned by the newest socket.
+    if (!isCurrent()) return;
+
+    if (update.qr) { qr = update.qr; status = 'awaiting_scan'; }
+
+    if (update.connection === 'open') {
+      qr = null;
+      status = 'connected';
+      connectedAt = Date.now();
+      retryAttempt = 0;
+      lastClose = null;
+      console.error('WhatsApp connection open');
+    }
+
+    if (update.connection === 'close') {
+      qr = null;
+      const code = update.lastDisconnect?.error?.output?.statusCode ?? null;
+      const reason = update.lastDisconnect?.error?.message ?? 'unknown';
+      lastClose = { code, at: Date.now(), reason: String(reason).slice(0, 200) };
+      console.error(`WhatsApp connection closed: code=${code ?? 'unknown'} message=${String(reason).slice(0, 200)}`);
+      retire(current);
+      if (socket === current) socket = null;
+
+      if (code === DisconnectReason.loggedOut) {
+        status = 'logged_out';
+        console.error('WhatsApp session logged out; controlled re-pairing required');
+        return;
+      }
+      if (stopping) { status = 'idle'; return; }
+
+      status = 'disconnected';
+      // 515 restart-required is expected right after a fresh pairing; reconnect quickly.
+      const delay = code === DisconnectReason.restartRequired ? 750 : Math.min(30000, 2000 * 2 ** retryAttempt++);
+      scheduleRetry(delay);
+    }
+  });
+}
+
+async function readJson(req, limit = 1_000_000) {
+  let raw = '';
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > limit) throw Object.assign(new Error('Payload terlalu besar'), { status: 413 });
+  }
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { throw Object.assign(new Error('JSON tidak valid'), { status: 400 }); }
+}
+
+const send = (res, code, payload) => { res.writeHead(code); res.end(JSON.stringify(payload)); };
+
+const server = createServer(async (req, res) => {
+  if (req.url === '/mcp') { await handleMcp(req, res); return; }
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
+  if (req.url === '/login' && req.method === 'GET') {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(loginHtml); return;
+  }
+  if (req.url === '/login' && req.method === 'POST') {
+    const origin = req.headers.origin;
+    if (origin !== `https://${req.headers.host}` && origin !== `http://${req.headers.host}`) { res.writeHead(403); res.end(); return; }
+    const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+    const now = Date.now();
+    if (loginAttempts.size > 10000) for (const [key, entry] of loginAttempts) if (entry.until < now) loginAttempts.delete(key);
+    const attempt = loginAttempts.get(ip) || { count: 0, until: now + 60000 };
+    if (attempt.until < now) { attempt.count = 0; attempt.until = now + 60000; }
+    if (++attempt.count > 10) { send(res, 429, { error: 'Terlalu banyak percobaan. Tunggu satu menit.' }); return; }
+    loginAttempts.set(ip, attempt);
+    let body = '';
+    for await (const chunk of req) { body += chunk; if (body.length > 4096) { res.writeHead(413); res.end(); return; } }
+    const fields = new URLSearchParams(body);
+    // The generated hex password cannot contain whitespace; terminal copies may include a newline.
+    const submittedPassword = (fields.get('password') || '').trim();
+    if (!process.env.DASHBOARD_PASSWORD || !equal((fields.get('username') || '').trim(), 'admin') || !equal(submittedPassword, process.env.DASHBOARD_PASSWORD)) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.writeHead(401);
+      res.end(loginHtml.replace('<form ', '<p role="alert">Username atau password dashboard belum cocok. Gunakan admin dan password dashboard 48 karakter, bukan password SSH. Jangan sertakan tulisan DASHBOARD_PASSWORD=.</p><form ')); return;
+    }
+    const value = `${now + 8 * 3600000}.${randomBytes(24).toString('hex')}`;
+    res.setHeader('Set-Cookie', `chat_session=${value}.${sign(value)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800`);
+    res.writeHead(303, { Location: '/' }); res.end(); return;
+  }
+
+  const supplied = Buffer.from(req.headers.authorization || '');
+  const valid = (value) => {
+    const expected = Buffer.from(value);
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  };
+  const dashboardAuth = sessionValid(req.headers.cookie) || (process.env.DASHBOARD_PASSWORD && valid(`Basic ${Buffer.from(`admin:${process.env.DASHBOARD_PASSWORD}`).toString('base64')}`));
+  if (!valid(`Bearer ${token}`) && !dashboardAuth) {
+    if (req.url === '/') { res.writeHead(303, { Location: '/login' }); res.end(); return; }
+    send(res, 401, { error: 'Unauthorized' }); return;
+  }
+
+  try {
+    if (dashboardAuth && req.method !== 'GET' && req.headers['sec-fetch-site'] !== 'same-origin') {
+      send(res, 403, { error: 'Same-origin request required' }); return;
+    }
+
+    const assets = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/whatsapp.js': ['whatsapp.js', 'text/javascript'], '/inbox.js': ['inbox.js', 'text/javascript'] };
+    if (req.method === 'GET' && assets[req.url] && process.env.DASHBOARD_DIR) {
+      const [file, type] = assets[req.url];
+      const data = await readFile(`${process.env.DASHBOARD_DIR}/${file}`);
+      res.setHeader('Content-Type', type); res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.end(data); return;
+    }
+
+    if (req.url.startsWith('/api/whatsapp/')) req.url = req.url.slice('/api/whatsapp'.length);
+    if (req.method === 'POST' && req.url === '/logout') {
+      res.setHeader('Set-Cookie', 'chat_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0');
+      send(res, 200, { status: 'signed_out' }); return;
+    }
+
+    const url = new URL(req.url, 'http://localhost');
+    const path = url.pathname;
+    const method = req.method;
+
+    if (method === 'GET' && path === '/status') { send(res, 200, statusPayload()); return; }
+
+    if (method === 'GET' && path === '/qr') {
+      if (!qr) { send(res, 409, statusPayload()); return; }
+      send(res, 200, { image: await QRCode.toDataURL(qr) }); return;
+    }
+
+    if (method === 'POST' && path === '/connect') {
+      if (status === 'logged_out') { send(res, 409, { ...statusPayload(), error: 'Sesi keluar. Pairing ulang terkontrol diperlukan.' }); return; }
+      if (status === 'connected') { send(res, 200, statusPayload()); return; }
+      if (status === 'awaiting_scan') {
+        // Force a fresh QR on the same socket generation.
+        connectionGeneration++; qr = null; if (socket) retire(socket); socket = null;
+      }
+      connect();
+      send(res, 200, statusPayload()); return;
+    }
+
+    if (method === 'GET' && path === '/conversations') { send(res, 200, messages.list()); return; }
+    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
+
+    if (method === 'POST' && path === '/send') {
+      if (status !== 'connected' || !socket) { send(res, 409, { error: 'WhatsApp belum terhubung. Scan QR di Pengaturan.' }); return; }
+      const body = await readJson(req, 200000);
+      const phone = String(body.phone || '').replace(/\D/g, '').replace(/^0/, '62');
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      if (!/^\d{8,15}$/.test(phone) || !text || text.length > 4000) { send(res, 400, { error: 'Nomor atau pesan tidak valid' }); return; }
+      const jid = `${phone}@s.whatsapp.net`;
+      const result = await socket.sendMessage(jid, { text });
+      messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, timestamp: Date.now() });
+      send(res, 200, { id: result.key.id, status: 'submitted' }); return;
+    }
+
+    if (method === 'GET' && path === '/settings') { send(res, 200, store.settings()); return; }
+    if (method === 'POST' && path === '/settings') { send(res, 200, store.saveSettings(await readJson(req))); return; }
+
+    if (method === 'GET' && path === '/agent') { send(res, 200, store.agent(url.searchParams.get('instance') || 'default')); return; }
+    if (method === 'POST' && path === '/agent') { send(res, 200, store.saveAgent(await readJson(req))); return; }
+
+    for (const name of ['products', 'orders', 'forms', 'knowledge', 'contacts', 'templates']) {
+      const listPath = `/${name}`;
+      const itemPattern = new RegExp(`^/${name}/([A-Za-z0-9-]{1,64})$`);
+      if (method === 'GET' && path === listPath) { send(res, 200, store[name].list()); return; }
+      if (method === 'POST' && path === listPath) { send(res, 200, store[name].create(await readJson(req))); return; }
+      const item = path.match(itemPattern);
+      if (method === 'DELETE' && item) {
+        const removed = store[name].remove(item[1]);
+        if (!removed) { send(res, 404, { error: 'Data tidak ditemukan' }); return; }
+        send(res, 200, { deleted: true }); return;
+      }
+    }
+
+    send(res, 404, { error: 'Not found' });
+  } catch (error) {
+    if (!res.headersSent) send(res, error?.status || 500, { error: error?.status ? error.message : 'Gateway operation failed' });
+  }
+});
+
+server.listen(Number(process.env.PORT || 18181), '127.0.0.1');
+
+// A saved linked-device session must reconnect after a service restart.
+// Baileys only sets creds.registered during pairing-code linking, so the presence
+// of creds.me is the reliable signal that a QR-paired session already exists.
+if (hasSession()) connect();
+
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+  stopping = true; clearTimeout(retry); retry = null;
+  if (socket) retire(socket);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+});
