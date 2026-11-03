@@ -338,6 +338,18 @@ content.addEventListener('click', async event => {
   }
 });
 
+content.addEventListener('change', async event => {
+  if (!event.target.matches('#set-manual-shipping-priority')) return;
+  const target = document.querySelector('#shipping-pdf-result');
+  try {
+    await api('settings', post({ manualShippingPriority: event.target.checked }));
+    notify(target, event.target.checked ? 'Tarif manual diprioritaskan.' : 'Prioritas tarif manual dimatikan.', 'ok');
+  } catch (error) {
+    event.target.checked = !event.target.checked;
+    notify(target, error.message, 'error');
+  }
+});
+
 content.addEventListener('submit', async event => {
   const form = event.target;
   if (form.matches('#knowledge-form')) {
