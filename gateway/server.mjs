@@ -8,6 +8,8 @@ import QRCode from 'qrcode';
 import { openMessages } from './messages.mjs';
 import { openStore } from './store.mjs';
 import { mcpHandler } from './mcp.mjs';
+import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
+import { createAutoReply } from './auto-reply.mjs';
 
 const token = process.env.GATEWAY_TOKEN;
 if (!token || token.length < 32) throw new Error('GATEWAY_TOKEN must contain at least 32 characters');
@@ -15,6 +17,11 @@ const logger = pino({ level: 'silent' });
 const dbPath = process.env.MESSAGE_DB || ':memory:';
 const messages = openMessages(dbPath);
 const store = openStore(dbPath);
+const aiConfig = openAiConfig(dbPath, token);
+const aiRouter = createRouterClient(aiConfig);
+const autoReply = createAutoReply({ store, config: aiConfig, router: aiRouter, messages, buildMessages: buildAiMessages,
+  onError: () => console.error('AI auto-reply failed; no automatic retry will be sent'),
+});
 const handleMcp = mcpHandler({ token: process.env.MCP_TOKEN, messages, getStatus: () => status });
 
 let status = 'idle';
@@ -116,14 +123,18 @@ function connect() {
     saveCreds().catch(() => console.error('Unable to persist WhatsApp credentials'));
   });
 
-  current.ev.on('messages.upsert', ({ messages: batch }) => {
+  current.ev.on('messages.upsert', ({ messages: batch, type }) => {
     if (!isCurrent()) return;
     try {
       for (const message of batch) {
         const jid = message.key?.remoteJid;
         const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
-        if (!jid || !message.key?.id || !text || !jid.endsWith('@s.whatsapp.net')) continue;
-        messages.add({ id: message.key.id, jid, text, name: message.pushName || '', outgoing: message.key.fromMe, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() });
+        if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
+        const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
+        const fresh = messages.add(saved);
+        if (fresh && type === 'notify' && !saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
+          void autoReply(saved, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload) });
+        }
       }
     } catch { console.error('Unable to persist incoming messages'); }
   });
@@ -299,6 +310,17 @@ const server = createServer(async (req, res) => {
 
     if (method === 'GET' && path === '/agent') { send(res, 200, store.agent(url.searchParams.get('instance') || 'default')); return; }
     if (method === 'POST' && path === '/agent') { send(res, 200, store.saveAgent(await readJson(req))); return; }
+
+    if (method === 'GET' && path === '/ai/config') { send(res, 200, aiConfig.publicConfig()); return; }
+    if (method === 'POST' && path === '/ai/config') { send(res, 200, aiConfig.save(await readJson(req, 12000))); return; }
+    if (method === 'GET' && path === '/ai/models') { send(res, 200, { models: await aiRouter.models() }); return; }
+    if (method === 'POST' && path === '/ai/test') {
+      const input = await readJson(req, 12000);
+      const prompt = input.prompt === undefined ? 'Jawab singkat: koneksi CSPoint berhasil.' : input.prompt;
+      if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) { send(res, 400, { error: 'Pesan uji wajib diisi, maksimal 4.000 karakter.' }); return; }
+      const text = await aiRouter.complete(buildAiMessages(store.agent('default'), [{ text: prompt, outgoing: false }], store.products.list()));
+      send(res, 200, { reply: text, model: aiConfig.publicConfig().model }); return;
+    }
 
     for (const name of ['products', 'orders', 'forms', 'knowledge', 'contacts', 'templates']) {
       const listPath = `/${name}`;

@@ -324,6 +324,14 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .knowledge-dropzone { display: grid; align-content: center; gap: 7px; min-height: 118px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--soft); color: var(--muted); padding: 18px; }
 .manual-shipping-card { display: grid; gap: 14px; }.shipping-pdf-current { border-radius: 7px; background: var(--soft); color: var(--muted); padding: 12px; font-size: 13px; overflow-wrap: anywhere; }
 .knowledge-dropzone strong { color: var(--accent); font-size: 15px; }
+.ai-provider-card { margin-top: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.ai-provider-card h3 { font-size: 17px; }
+.ai-provider-card .hint { margin-top: 12px; }
+.ai-test-panel { margin-top: 24px; border-radius: 10px; background: var(--soft); padding: 16px; }
+.ai-test-reply { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 12px; }
+.ai-test-reply:empty { display: none; }
+.ai-test-reply[data-kind="error"] { color: #b3261e; }
+.form-grid > .full { grid-column: 1 / -1; }
 
 .menu-close, .chat-back { display: none; }
 .section, .pairing, .stat, .form-grid > *, .fu-form-grid > *, .switch-copy { min-width: 0; }

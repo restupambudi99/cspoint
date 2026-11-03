@@ -55,7 +55,7 @@ export function openStore(path) {
         scheduleEnabled: patch.scheduleEnabled === undefined ? Boolean(current.scheduleEnabled) : Boolean(patch.scheduleEnabled),
         scheduleStart: /^\d{2}:\d{2}$/.test(patch.scheduleStart || '') ? patch.scheduleStart : (current.scheduleStart || '08:00'),
         scheduleEnd: /^\d{2}:\d{2}$/.test(patch.scheduleEnd || '') ? patch.scheduleEnd : (current.scheduleEnd || '21:00'),
-        dailyLimit: Math.max(0, int(patch.dailyLimit, current.dailyLimit || 100)),
+        dailyLimit: Math.max(0, int(patch.dailyLimit, current.dailyLimit)),
         sendMode: ['Aman (bertahap)', 'Normal'].includes(patch.sendMode) ? patch.sendMode : (current.sendMode || 'Aman (bertahap)'),
         autoReply: patch.autoReply === undefined ? Boolean(current.autoReply) : Boolean(patch.autoReply),
         saveHistory: patch.saveHistory === undefined ? current.saveHistory !== false : Boolean(patch.saveHistory),

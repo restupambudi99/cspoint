@@ -1,0 +1,97 @@
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
+import { createAutoReply } from './auto-reply.mjs';
+import { openMessages } from './messages.mjs';
+import { openStore } from './store.mjs';
+
+const folder = await mkdtemp(join(tmpdir(), 'cspoint-ai-test-'));
+const path = join(folder, 'qa.sqlite');
+const secret = 'test-only-server-encryption-secret';
+const apiKey = 'qa-router-secret-not-for-production';
+let config = openAiConfig(path, secret), calls = 0, reject = false, lastPayload;
+const server = createServer(async (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  assert.equal(req.headers.authorization, `Bearer ${apiKey}`);
+  if (reject) { res.writeHead(401); res.end(JSON.stringify({ error: `Secret ${apiKey}` })); return; }
+  if (req.url === '/v1/models') { res.end(JSON.stringify({ data: [{ id: 'Fallback' }] })); return; }
+  let raw = '';
+  for await (const chunk of req) raw += chunk;
+  lastPayload = JSON.parse(raw);
+  calls++;
+  res.end(JSON.stringify({ choices: [{ message: { content: 'Halo, saya CSPoint. Ada yang bisa dibantu?' } }] }));
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+let router = createRouterClient(config, { baseUrl: `http://127.0.0.1:${server.address().port}/v1` });
+const store = openStore(':memory:'), messages = openMessages(':memory:');
+try {
+  assert.equal(config.publicConfig().hasApiKey, false);
+  assert.throws(() => config.credentials(), /terlebih dahulu/);
+  const saved = config.save({ model: 'Fallback', apiKey });
+  assert.equal(saved.hasApiKey, true);
+  assert.equal(JSON.stringify(saved).includes(apiKey), false);
+  config.save({ model: 'Fallback', apiKey: '' });
+  assert.equal(config.credentials().apiKey, apiKey, 'empty password preserves the stored key');
+  config.close();
+  assert.equal((await readFile(path)).includes(Buffer.from(apiKey)), false, 'database must not contain plaintext API key');
+  config = openAiConfig(path, secret);
+  router = createRouterClient(config, { baseUrl: `http://127.0.0.1:${server.address().port}/v1` });
+  assert.equal(config.credentials().apiKey, apiKey, 'encrypted key survives restart');
+  assert.throws(() => config.save({ apiKey: 'bad\nkey' }), /tidak valid/);
+  assert.throws(() => config.save({ model: '' }), /tidak valid/);
+
+  assert.deepEqual(await router.models(), ['Fallback']);
+  const prompt = buildAiMessages({ assistantName: 'CSPoint', instructions: 'Jawab ramah.' }, [{ text: 'Halo', outgoing: false }]);
+  assert.match(await router.complete(prompt), /CSPoint/);
+  assert.equal(lastPayload.model, 'Fallback');
+  assert.equal(lastPayload.messages[0].role, 'system');
+  assert.equal(lastPayload.messages.at(-1).role, 'user');
+  reject = true;
+  await assert.rejects(router.complete(prompt), error => error.status === 502 && !error.message.includes(apiKey));
+  reject = false;
+
+  let sent = [], current = true;
+  const onError = error => { throw error; };
+  const connection = { isCurrent: () => current, send: async (jid, payload) => { sent.push({ jid, ...payload }); return { key: { id: `out-${sent.length}` } }; } };
+  const inbound = { id: 'in-1', jid: '628123450000@s.whatsapp.net', text: 'Halo', outgoing: false, timestamp: Date.now() };
+  assert.equal(messages.add(inbound), true);
+  assert.equal(messages.add(inbound), false, 'duplicate WhatsApp delivery is recognized');
+  const reply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {} });
+  await reply(inbound, connection);
+  assert.equal(sent.length, 0, 'disabled agent must not send');
+  store.saveAgent({ enabled: true });
+  await reply(inbound, connection);
+  assert.equal(sent.length, 0, 'global auto-reply switch must also be on');
+  store.saveSettings({ autoReply: true, dailyLimit: 1 });
+  await reply(inbound, connection);
+  assert.equal(sent.length, 1);
+  assert.equal(messages.thread(inbound.jid).at(-1).outgoing, 1);
+  const afterReply = calls;
+  await reply(inbound, connection);
+  await reply({ ...inbound, id: 'in-2' }, connection);
+  assert.equal(calls, afterReply, 'deduplication and daily cap prevent extra inference');
+  assert.equal(sent.length, 1);
+  store.saveSettings({ dailyLimit: 0 });
+  current = false;
+  await reply({ ...inbound, id: 'in-3' }, connection);
+  assert.equal(calls, afterReply, 'stale connection must not trigger inference');
+  current = true;
+  const cancellingReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => { current = false; } });
+  await cancellingReply({ ...inbound, id: 'in-4' }, connection);
+  assert.equal(sent.length, 1, 'disconnect during inference cancels the send');
+  current = true;
+  store.saveSettings({ scheduleEnabled: true, scheduleStart: '08:00', scheduleEnd: '09:00' });
+  const scheduledReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {}, now: () => new Date('2026-11-04T05:00:00Z') });
+  const beforeSchedule = calls;
+  await scheduledReply({ ...inbound, id: 'in-5' }, connection);
+  assert.equal(calls, beforeSchedule, 'outside configured Jakarta hours must not trigger inference');
+  console.log('PASS: encrypted key persistence/redaction, 9Router auth/models/completions, sanitized errors, auto-reply switches, history, deduplication, daily cap, reconnect cancellation and schedule');
+} finally {
+  config.close(); store.close(); messages.close();
+  server.closeAllConnections();
+  await new Promise(resolve => server.close(resolve));
+  await rm(folder, { recursive: true, force: true });
+}

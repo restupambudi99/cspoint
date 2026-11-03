@@ -62,7 +62,7 @@ async function loadSettings() {
     document.querySelector('#set-schedule-end').value = settings.scheduleEnd || '21:00';
     document.querySelector('#set-auto-reply').checked = Boolean(settings.autoReply);
     document.querySelector('#set-save-history').checked = settings.saveHistory !== false;
-    document.querySelector('#set-daily-limit').value = settings.dailyLimit || 100;
+    document.querySelector('#set-daily-limit').value = settings.dailyLimit ?? 100;
     document.querySelector('#set-send-mode').value = settings.sendMode || 'Aman (bertahap)';
     document.querySelector('#set-manual-shipping-priority').checked = settings.manualShippingPriority !== false;
     for (const box of document.querySelectorAll('input[name=courier]')) box.checked = (settings.couriers || []).includes(box.value);
@@ -112,15 +112,26 @@ async function drawAgent() {
   const panel = document.querySelector('#ai-panel');
   if (!panel) return;
   try {
-    const agent = await api('agent?instance=default');
+    const [agent, provider] = await Promise.all([api('agent?instance=default'), api('ai/config')]);
     panel.innerHTML = `
+      <section class="ai-provider-card" aria-labelledby="ai-provider-title">
+        <div class="section-head"><div><h3 id="ai-provider-title">Koneksi AI · 9Router</h3><p class="intro">Konfigurasi koneksi AI untuk ruang kerja CSPoint.</p></div><span id="ai-key-status" class="status-label">${provider.hasApiKey ? 'API key tersimpan' : 'API key belum diisi'}</span></div>
+        <div class="form-grid">
+          <label class="field full">Base URL<input id="ai-base-url" value="${esc(provider.baseUrl)}" readonly></label>
+          <label class="field">Model / combo 9Router<input id="ai-model" value="${esc(provider.model)}" maxlength="200" list="ai-model-list" autocomplete="off"><datalist id="ai-model-list"></datalist></label>
+          <label class="field">API key 9Router<input id="ai-api-key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="${provider.hasApiKey ? 'Key tersimpan. Isi hanya untuk mengganti.' : 'Tempel API key 9Router Anda'}" aria-describedby="ai-key-hint"></label>
+        </div>
+        <p class="hint" id="ai-key-hint">Key disimpan terenkripsi di server. Kosongkan kolom untuk mempertahankan key yang sudah tersimpan.</p>
+        <div class="section-actions"><button class="button" type="button" data-save-ai-config>Simpan Koneksi AI</button><button class="button secondary" type="button" data-ai-models ${provider.hasApiKey ? '' : 'disabled'}>Muat Daftar Model</button><p id="ai-provider-result" class="hint" role="status"></p></div>
+        <div class="ai-test-panel"><label class="field">Pesan uji AI<textarea id="ai-test-prompt" rows="2" maxlength="4000">Halo, perkenalkan dirimu secara singkat.</textarea></label><div class="section-actions"><button class="button secondary" type="button" data-ai-test ${provider.hasApiKey ? '' : 'disabled'}>Uji Balasan AI</button><p class="hint">Simpan koneksi dahulu. Pengujian ini tidak mengirim pesan WhatsApp.</p></div><p id="ai-test-reply" class="ai-test-reply" role="status"></p></div>
+      </section>
       <div class="form-grid">
         <label class="field">Nama asisten<input id="agent-name" value="${esc(agent.assistantName)}" maxlength="60"></label>
         <label class="field full">Instruksi<textarea id="agent-instructions" rows="6" maxlength="8000">${esc(agent.instructions)}</textarea></label>
         <label class="check"><input id="agent-enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Aktifkan AI Agent</label>
       </div>
       <div class="section-actions"><button class="button" data-save-agent>Simpan Agent</button><p role="status" id="agent-result" class="hint"></p></div>
-      <p class="hint">Catatan: konfigurasi tersimpan di server, tetapi mesin balasan AI belum dijalankan oleh gateway.</p>`;
+      <p class="hint">Balasan WhatsApp otomatis memerlukan koneksi 9Router, toggle Aktifkan AI Agent di atas, dan Aktifkan balasan otomatis di Pengaturan. Knowledge PDF belum dibaca otomatis oleh AI.</p>`;
   } catch (error) {
     panel.innerHTML = `<p class="empty">Gagal memuat agent: ${esc(error.message)}</p>`;
   }
@@ -326,6 +337,37 @@ content.addEventListener('click', async event => {
         notify(target, `Tersimpan: ${saved.assistantName} (${saved.enabled ? 'aktif' : 'nonaktif'}).`, 'ok');
       } finally { button.disabled = false; }
     }
+    if (button.matches('[data-save-ai-config]')) {
+      const target = document.querySelector('#ai-provider-result');
+      button.disabled = true;
+      try {
+        const config = await api('ai/config', post({ model: document.querySelector('#ai-model').value, apiKey: document.querySelector('#ai-api-key').value }));
+        document.querySelector('#ai-api-key').value = '';
+        document.querySelector('#ai-api-key').placeholder = config.hasApiKey ? 'Key tersimpan. Isi hanya untuk mengganti.' : 'Tempel API key 9Router Anda';
+        document.querySelector('#ai-key-status').textContent = config.hasApiKey ? 'API key tersimpan' : 'API key belum diisi';
+        document.querySelector('[data-ai-models]').disabled = !config.hasApiKey;
+        document.querySelector('[data-ai-test]').disabled = !config.hasApiKey;
+        notify(target, 'Koneksi tersimpan. Gunakan Uji Balasan AI untuk memeriksa model dan API key.', 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-ai-models]')) {
+      button.disabled = true;
+      try {
+        const { models } = await api('ai/models');
+        document.querySelector('#ai-model-list').innerHTML = models.map(model => `<option value="${esc(model)}"></option>`).join('');
+        notify(document.querySelector('#ai-provider-result'), `${models.length} model dimuat. Pilih dari kolom model, lalu simpan.`, 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-ai-test]')) {
+      const target = document.querySelector('#ai-test-reply');
+      button.disabled = true;
+      notify(target, 'Menunggu jawaban 9Router…');
+      try {
+        const result = await api('ai/test', post({ prompt: document.querySelector('#ai-test-prompt').value }));
+        notify(target, result.reply, 'ok');
+      } catch (error) { notify(target, error.message, 'error'); }
+      finally { button.disabled = false; }
+    }
     if (button.matches('[data-domain-delete]')) {
       button.disabled = true;
       const [kind, id] = button.dataset.domainDelete.split('/');
@@ -333,7 +375,7 @@ content.addEventListener('click', async event => {
       if (kind === 'knowledge') knowledgePanel(); else loadDomain(kind);
     }
   } catch (error) {
-    const target = document.querySelector('#domain-result') || document.querySelector('#settings-result') || document.querySelector('#send-result') || document.querySelector('#agent-result') || document.querySelector('#knowledge-result');
+    const target = document.querySelector('#domain-result') || document.querySelector('#settings-result') || document.querySelector('#send-result') || document.querySelector('#ai-provider-result') || document.querySelector('#agent-result') || document.querySelector('#knowledge-result');
     notify(target, error.message, 'error');
     if (!target) alert(error.message);
     button.disabled = false;
