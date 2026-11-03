@@ -66,6 +66,7 @@ export function openStore(path) {
         manualShippingPriority: patch.manualShippingPriority === undefined ? current.manualShippingPriority !== false : Boolean(patch.manualShippingPriority),
       };
       if (next.maxInterval < next.minInterval) next.maxInterval = next.minInterval;
+      if (next.shippingPdfContent && next.shippingPdfContent.length > 500000) throw Object.assign(new Error('Data PDF ongkir melebihi batas 500.000 karakter'), { status: 413 });
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
       for (const [key, value] of Object.entries(next)) { if (value === undefined) continue; statement.run(key, key === 'couriers' ? JSON.stringify(value) : String(value)); }
       return next;
@@ -114,7 +115,7 @@ export function openStore(path) {
         const name = text(input.name, 160);
         const content = String(input.content ?? '').trim();
         if (!name || !content) throw Object.assign(new Error('Nama dan isi knowledge wajib diisi'), { status: 400 });
-        if (content.length > 12000000) throw Object.assign(new Error('Isi knowledge melebihi batas 12 MB'), { status: 413 });
+        if (content.length > 500000) throw Object.assign(new Error('Isi knowledge PDF melebihi batas 500.000 karakter'), { status: 413 });
         const row = { id: id(), name, content, mime: text(input.mime, 80) || 'text/plain', status: input.mime === 'application/pdf' ? 'PDF tersimpan' : 'siap', created_at: now() };
         db.prepare('INSERT INTO knowledge VALUES (?,?,?,?,?,?)').run(row.id, row.name, row.content, row.mime, row.status, row.created_at);
         return { id: row.id, name: row.name, mime: row.mime, status: row.status, created_at: row.created_at, size: content.length };

@@ -54,6 +54,8 @@ try {
   assert.equal(result.body.shippingPdfSize, 42);
   assert.equal(result.body.shippingPdfContent, undefined, 'settings response must not expose PDF content');
   assert.equal(result.body.rotation, 'Random (Acak)');
+  result = await json('/settings', { method: 'POST', body: JSON.stringify({ shippingPdfContent: 'x'.repeat(500001) }) });
+  assert.equal(result.code, 413);
   result = await json('/settings', { method: 'POST', body: JSON.stringify({ minInterval: 5, maxInterval: 1 }) });
   assert.equal(result.body.maxInterval, 5, 'maxInterval must not drop below minInterval');
 
@@ -88,6 +90,8 @@ try {
   result = await json('/knowledge');
   assert.equal(result.body.length, 1);
   assert.equal(result.body[0].content, undefined, 'knowledge list must not embed full document bodies');
+  result = await json('/knowledge', { method: 'POST', body: JSON.stringify({ name: 'Terlalu besar', content: 'x'.repeat(500001) }) });
+  assert.equal(result.code, 413);
 
   result = await json('/agent?instance=default');
   assert.equal(result.body.assistantName, 'Kak');
