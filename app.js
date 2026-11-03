@@ -42,7 +42,7 @@ function settingsPage() {
     section('Ekspedisi Cek Ongkir', 'Ekspedisi yang dipakai saat menghitung ongkir.', `
       <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}">${esc(name)}</label>`).join('')}</div>
       <div class="section-actions"><button class="button" data-save-shipping>Simpan Ekspedisi</button><p role="status" id="shipping-result" class="hint"></p></div>`),
-    section('Ongkir Manual dari PDF', 'Unggah daftar tarif ongkir manual untuk dipakai sebagai sumber perhitungan.', `<div class="manual-shipping-card"><label class="field full">File tarif ongkir PDF<input id="shipping-pdf" type="file" accept="application/pdf,.pdf"><span class="hint">PDF berisi tabel tarif, zona, berat, atau ketentuan ongkir. Maksimal 8 MB.</span></label><p id="shipping-pdf-current" class="shipping-pdf-current">Belum ada PDF ongkir tersimpan.</p><div class="section-actions"><button class="button" data-save-shipping-pdf>Simpan PDF Ongkir</button><p role="status" id="shipping-pdf-result" class="hint"></p></div></div>`),
+    section('Ongkir Manual dari PDF', 'Unggah daftar tarif per kecamatan untuk dipakai sebagai sumber perhitungan.', `<div class="manual-shipping-card"><div class="switch-row manual-priority"><div class="switch-copy"><strong>Prioritaskan tarif manual</strong><span>Jika kecamatan pembeli ada di daftar, AI memakai tarif ini. Jika tidak ada, tetap cek RajaOngkir.</span></div><label class="switch"><input id="set-manual-shipping-priority" type="checkbox"><span class="track"></span></label></div><label class="field full">File tarif ongkir PDF<input id="shipping-pdf" type="file" accept="application/pdf,.pdf"><span class="hint">Format: Kecamatan / Kabupaten → tarif. Maksimal 8 MB.</span></label><p id="shipping-pdf-current" class="shipping-pdf-current">Belum ada PDF ongkir tersimpan.</p><div class="section-actions"><button class="button" data-save-shipping-pdf>Simpan PDF Ongkir</button><p role="status" id="shipping-pdf-result" class="hint"></p></div></div>`),
     section('Pesan Masuk', 'Atur perilaku saat pesan pelanggan masuk.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan balasan otomatis</strong><span>AI Agent akan merespons pesan ketika konfigurasi sudah aktif.</span></div><label class="switch"><input id="set-auto-reply" type="checkbox"><span class="track"></span></label></div><div class="switch-row"><div class="switch-copy"><strong>Simpan riwayat pesan</strong><span>Pesan disimpan untuk Kotak Masuk dan analitik.</span></div><label class="switch"><input id="set-save-history" type="checkbox" checked><span class="track"></span></label></div><div class="section-actions"><button class="button" data-save-inbox>Simpan Pengaturan</button><p role="status" id="inbox-result" class="hint"></p></div>`),
     section('Pengaturan Pengiriman', 'Atur batas dan perilaku pengiriman pesan massal.', `<div class="form-grid"><label class="field">Batas pesan per hari<input id="set-daily-limit" type="number" min="0" value="100"></label><label class="field">Mode pengiriman<select id="set-send-mode"><option>Aman (bertahap)</option><option>Normal</option></select></label></div><p class="hint">Gunakan interval acak dan batas harian untuk menjaga kualitas pengiriman WhatsApp.</p>`),
   ].join('');
@@ -63,6 +63,7 @@ async function loadSettings() {
     document.querySelector('#set-save-history').checked = settings.saveHistory !== false;
     document.querySelector('#set-daily-limit').value = settings.dailyLimit || 100;
     document.querySelector('#set-send-mode').value = settings.sendMode || 'Aman (bertahap)';
+    document.querySelector('#set-manual-shipping-priority').checked = settings.manualShippingPriority !== false;
     for (const box of document.querySelectorAll('input[name=courier]')) box.checked = (settings.couriers || []).includes(box.value);
     if (settings.shippingPdfName) document.querySelector('#shipping-pdf-current').textContent = `PDF tersimpan: ${settings.shippingPdfName} (${Number(settings.shippingPdfSize || 0).toLocaleString('id-ID')} byte)`;
   } catch (error) {
@@ -271,6 +272,7 @@ content.addEventListener('click', async event => {
           sendMode: document.querySelector('#set-send-mode').value,
           autoReply: document.querySelector('#set-auto-reply').checked,
           saveHistory: document.querySelector('#set-save-history').checked,
+          manualShippingPriority: document.querySelector('#set-manual-shipping-priority').checked,
         }));
         notify(target, `Tersimpan: interval ${saved.minInterval}–${saved.maxInterval} detik, ${saved.rotation}.`, 'ok');
       } finally { button.disabled = false; }
@@ -288,7 +290,7 @@ content.addEventListener('click', async event => {
       if (!file || file.type !== 'application/pdf') { notify(target, 'Pilih file PDF ongkir yang valid.', 'error'); return; }
       if (file.size > 8 * 1024 * 1024) { notify(target, 'Ukuran PDF maksimal 8 MB.', 'error'); return; }
       button.disabled = true;
-      try { const bytes = new Uint8Array(await file.arrayBuffer()); let binary=''; for(let i=0;i<bytes.length;i+=0x8000) binary += String.fromCharCode(...bytes.subarray(i,i+0x8000)); await api('settings', post({ shippingPdfName: file.name, shippingPdfContent: btoa(binary), shippingPdfMime: 'application/pdf', shippingPdfSize: file.size })); document.querySelector('#shipping-pdf-current').textContent = `PDF tersimpan: ${file.name} (${file.size.toLocaleString('id-ID')} byte)`; notify(target, 'PDF ongkir tersimpan di server.', 'ok'); } catch(e) { notify(target, e.message, 'error'); } finally { button.disabled=false; }
+      try { const bytes = new Uint8Array(await file.arrayBuffer()); let binary=''; for(let i=0;i<bytes.length;i+=0x8000) binary += String.fromCharCode(...bytes.subarray(i,i+0x8000)); await api('settings', post({ shippingPdfName: file.name, shippingPdfContent: btoa(binary), shippingPdfMime: 'application/pdf', shippingPdfSize: file.size, manualShippingPriority: document.querySelector('#set-manual-shipping-priority').checked })); document.querySelector('#shipping-pdf-current').textContent = `PDF tersimpan: ${file.name} (${file.size.toLocaleString('id-ID')} byte)`; notify(target, 'PDF ongkir tersimpan di server.', 'ok'); } catch(e) { notify(target, e.message, 'error'); } finally { button.disabled=false; }
     }
     if (button.matches('[data-save-inbox]')) {
       const target = document.querySelector('#inbox-result'); button.disabled = true;

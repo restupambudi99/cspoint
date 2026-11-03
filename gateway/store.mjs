@@ -42,6 +42,7 @@ export function openStore(path) {
         saveHistory: stored.saveHistory !== 'false',
         shippingPdfName: stored.shippingPdfName || '',
         shippingPdfSize: int(stored.shippingPdfSize, 0),
+        manualShippingPriority: stored.manualShippingPriority !== 'false',
       };
     },
     saveSettings(patch = {}) {
@@ -62,6 +63,7 @@ export function openStore(path) {
         shippingPdfContent: patch.shippingPdfContent === undefined ? undefined : String(patch.shippingPdfContent),
         shippingPdfMime: patch.shippingPdfMime === undefined ? undefined : text(patch.shippingPdfMime, 80),
         shippingPdfSize: patch.shippingPdfSize === undefined ? current.shippingPdfSize : Math.max(0, int(patch.shippingPdfSize)),
+        manualShippingPriority: patch.manualShippingPriority === undefined ? current.manualShippingPriority !== false : Boolean(patch.manualShippingPriority),
       };
       if (next.maxInterval < next.minInterval) next.maxInterval = next.minInterval;
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
