@@ -172,7 +172,13 @@ async function loadDomain(kind) {
   }
 }
 
-const ordersPage = () => domainPage('orders');
+function ordersPage() {
+  content.innerHTML = `<div class="orders-page"><div class="orders-intro"><div><span class="eyebrow">Operasional</span><h2>Pesanan</h2><p>Kelola pesanan pelanggan dan status pengirimannya.</p></div><button class="button" data-focus-order-form>+ Tambah Pesanan</button></div><div class="order-summary"><button class="order-status active" data-order-filter="all"><strong id="order-all">0</strong><span>Semua Pesanan</span></button><button class="order-status" data-order-filter="Menunggu Bayar"><strong id="order-waiting">0</strong><span>Menunggu Bayar</span></button><button class="order-status" data-order-filter="Diproses"><strong id="order-process">0</strong><span>Diproses</span></button><button class="order-status" data-order-filter="Selesai"><strong id="order-done">0</strong><span>Selesai</span></button></div><section class="section order-create" id="order-create"><div class="section-head"><div><h2>Tambah Pesanan</h2><p class="intro">Simpan pesanan baru dari percakapan pelanggan.</p></div></div><form class="form-grid" data-domain-form="orders"><label class="field">Nama pelanggan *<input name="customer" required></label><label class="field">Nomor WhatsApp<input name="phone" placeholder="628xxx"></label><label class="field">Total pembayaran<input name="total" type="number" min="0"></label><label class="field">Status<select name="status"><option>Menunggu Bayar</option><option>Diproses</option><option>Selesai</option></select></label><div class="section-actions"><button class="button" type="submit">Simpan Pesanan</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section order-list-section"><div class="section-head"><div><h2>Daftar Pesanan</h2><p class="intro">Pesanan terbaru tersimpan di server.</p></div><input class="order-search" id="order-search" placeholder="Cari pesanan…"></div><div id="order-list" class="order-list"><p class="empty">Memuat pesanan…</p></div></section></div>`;
+  document.querySelector('#order-search').addEventListener('input', () => { const active = document.querySelector('[data-order-filter].active'); drawOrders(active?.dataset.orderFilter || 'all'); });
+  loadOrders();
+}
+async function loadOrders() { const list = document.querySelector('#order-list'); try { const items = await api('orders'); window.__orders = items; for (const [id, status] of [['order-all','all'],['order-waiting','Menunggu Bayar'],['order-process','Diproses'],['order-done','Selesai']]) document.querySelector(`#${id}`).textContent = status === 'all' ? items.length : items.filter(x => x.status === status).length; drawOrders('all'); } catch (e) { list.innerHTML = `<p class="empty">Gagal memuat pesanan: ${esc(e.message)}</p>`; } }
+function drawOrders(filter) { const list = document.querySelector('#order-list'); const q = (document.querySelector('#order-search')?.value || '').toLowerCase(); const items = (window.__orders || []).filter(x => (filter === 'all' || x.status === filter) && `${x.customer} ${x.phone} ${x.status}`.toLowerCase().includes(q)); list.innerHTML = items.length ? items.map(x => `<article class="order-card"><span class="order-avatar">${esc((x.customer || '?').slice(0,1).toUpperCase())}</span><div class="order-main"><strong>${esc(x.customer)}</strong><span>${esc(x.phone || 'Nomor belum diisi')} · ${esc(new Date(x.created_at).toLocaleDateString('id-ID'))}</span></div><strong class="order-total">Rp ${Number(x.total || 0).toLocaleString('id-ID')}</strong><span class="order-badge status-${esc((x.status || '').toLowerCase().replaceAll(' ','-'))}">${esc(x.status)}</span><button class="button secondary" data-domain-delete="orders/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada pesanan</strong><span>Pesanan baru akan muncul di daftar ini.</span></p>'; }
 const productsPage = () => domainPage('products');
 const formsPage = () => domainPage('forms');
 const contactsPage = () => domainPage('contacts');
@@ -214,6 +220,8 @@ function render() {
 content.addEventListener('click', async event => {
   const button = event.target.closest('button');
   if (!button) return;
+  if (button.matches('[data-focus-order-form]')) { document.querySelector('#order-create')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.querySelector('#order-create input[name="customer"]')?.focus(); return; }
+  if (button.matches('[data-order-filter]')) { document.querySelectorAll('[data-order-filter]').forEach(item => item.classList.toggle('active', item === button)); drawOrders(button.dataset.orderFilter); return; }
   const result = document.querySelector('#domain-result');
   try {
     if (button.matches('[data-save-settings]')) {
@@ -303,7 +311,7 @@ content.addEventListener('submit', async event => {
     try {
       await api(kind, post(payload));
       form.reset();
-      await loadDomain(kind);
+      if (kind === 'orders') await loadOrders(); else await loadDomain(kind);
       notify(document.querySelector('#domain-result'), 'Data tersimpan di server.', 'ok');
     } catch (error) { notify(document.querySelector('#domain-result'), error.message, 'error'); }
   }
