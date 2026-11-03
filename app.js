@@ -38,9 +38,12 @@ function settingsPage() {
         <label class="field">Rotasi<select id="set-rotation"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select></label>
       </div>
       <div class="section-actions"><button class="button" data-save-settings>Simpan Pengaturan</button><p role="status" id="settings-result" class="hint"></p></div>`),
+    section('Waktu Operasional', 'Pesan otomatis hanya dikirim pada waktu yang Anda tentukan.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan batas waktu</strong><span>Batasi pengiriman pesan di luar jam kerja.</span></div><label class="switch"><input id="set-schedule-enabled" type="checkbox"><span class="track"></span></label></div><div class="form-grid schedule-fields"><label class="field">Mulai<input id="set-schedule-start" type="time" value="08:00"></label><label class="field">Selesai<input id="set-schedule-end" type="time" value="21:00"></label></div>`),
     section('Ekspedisi Cek Ongkir', 'Ekspedisi yang dipakai saat menghitung ongkir.', `
       <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}">${esc(name)}</label>`).join('')}</div>
       <div class="section-actions"><button class="button" data-save-shipping>Simpan Ekspedisi</button><p role="status" id="shipping-result" class="hint"></p></div>`),
+    section('Pesan Masuk', 'Atur perilaku saat pesan pelanggan masuk.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan balasan otomatis</strong><span>AI Agent akan merespons pesan ketika konfigurasi sudah aktif.</span></div><label class="switch"><input id="set-auto-reply" type="checkbox"><span class="track"></span></label></div><div class="switch-row"><div class="switch-copy"><strong>Simpan riwayat pesan</strong><span>Pesan disimpan untuk Kotak Masuk dan analitik.</span></div><label class="switch"><input id="set-save-history" type="checkbox" checked><span class="track"></span></label></div><div class="section-actions"><button class="button" data-save-inbox>Simpan Pengaturan</button><p role="status" id="inbox-result" class="hint"></p></div>`),
+    section('Pengaturan Pengiriman', 'Atur batas dan perilaku pengiriman pesan massal.', `<div class="form-grid"><label class="field">Batas pesan per hari<input id="set-daily-limit" type="number" min="0" value="100"></label><label class="field">Mode pengiriman<select id="set-send-mode"><option>Aman (bertahap)</option><option>Normal</option></select></label></div><p class="hint">Gunakan interval acak dan batas harian untuk menjaga kualitas pengiriman WhatsApp.</p>`),
   ].join('');
   loadSettings();
 }
@@ -52,6 +55,13 @@ async function loadSettings() {
     document.querySelector('#set-min').value = settings.minInterval;
     document.querySelector('#set-max').value = settings.maxInterval;
     document.querySelector('#set-rotation').value = settings.rotation;
+    document.querySelector('#set-schedule-enabled').checked = Boolean(settings.scheduleEnabled);
+    document.querySelector('#set-schedule-start').value = settings.scheduleStart || '08:00';
+    document.querySelector('#set-schedule-end').value = settings.scheduleEnd || '21:00';
+    document.querySelector('#set-auto-reply').checked = Boolean(settings.autoReply);
+    document.querySelector('#set-save-history').checked = settings.saveHistory !== false;
+    document.querySelector('#set-daily-limit').value = settings.dailyLimit || 100;
+    document.querySelector('#set-send-mode').value = settings.sendMode || 'Aman (bertahap)';
     for (const box of document.querySelectorAll('input[name=courier]')) box.checked = (settings.couriers || []).includes(box.value);
   } catch (error) {
     notify(result, `Gagal memuat pengaturan: ${error.message}`, 'error');
@@ -252,6 +262,13 @@ content.addEventListener('click', async event => {
           minInterval: Number(document.querySelector('#set-min').value),
           maxInterval: Number(document.querySelector('#set-max').value),
           rotation: document.querySelector('#set-rotation').value,
+          scheduleEnabled: document.querySelector('#set-schedule-enabled').checked,
+          scheduleStart: document.querySelector('#set-schedule-start').value,
+          scheduleEnd: document.querySelector('#set-schedule-end').value,
+          dailyLimit: Number(document.querySelector('#set-daily-limit').value),
+          sendMode: document.querySelector('#set-send-mode').value,
+          autoReply: document.querySelector('#set-auto-reply').checked,
+          saveHistory: document.querySelector('#set-save-history').checked,
         }));
         notify(target, `Tersimpan: interval ${saved.minInterval}–${saved.maxInterval} detik, ${saved.rotation}.`, 'ok');
       } finally { button.disabled = false; }
@@ -263,6 +280,10 @@ content.addEventListener('click', async event => {
         const saved = await api('settings', post({ couriers: [...document.querySelectorAll('input[name=courier]:checked')].map(box => box.value) }));
         notify(target, `Tersimpan: ${saved.couriers.length} ekspedisi.`, 'ok');
       } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-save-inbox]')) {
+      const target = document.querySelector('#inbox-result'); button.disabled = true;
+      try { await api('settings', post({ autoReply: document.querySelector('#set-auto-reply').checked, saveHistory: document.querySelector('#set-save-history').checked })); notify(target, 'Pengaturan pesan masuk tersimpan.', 'ok'); } finally { button.disabled = false; }
     }
     if (button.matches('[data-send-message]')) {
       const target = document.querySelector('#send-result');

@@ -33,6 +33,13 @@ export function openStore(path) {
         maxInterval: int(stored.maxInterval, 5),
         rotation: stored.rotation || 'Round Robin (Bergantian)',
         couriers: stored.couriers ? JSON.parse(stored.couriers) : [],
+        scheduleEnabled: stored.scheduleEnabled === 'true',
+        scheduleStart: stored.scheduleStart || '08:00',
+        scheduleEnd: stored.scheduleEnd || '21:00',
+        dailyLimit: int(stored.dailyLimit, 100),
+        sendMode: stored.sendMode || 'Aman (bertahap)',
+        autoReply: stored.autoReply === 'true',
+        saveHistory: stored.saveHistory !== 'false',
       };
     },
     saveSettings(patch = {}) {
@@ -42,6 +49,13 @@ export function openStore(path) {
         maxInterval: Math.min(600, Math.max(1, int(patch.maxInterval, current.maxInterval))),
         rotation: ['Round Robin (Bergantian)', 'Random (Acak)'].includes(patch.rotation) ? patch.rotation : current.rotation,
         couriers: Array.isArray(patch.couriers) ? patch.couriers.map(value => text(value, 40)).filter(Boolean).slice(0, 20) : current.couriers,
+        scheduleEnabled: patch.scheduleEnabled === undefined ? Boolean(current.scheduleEnabled) : Boolean(patch.scheduleEnabled),
+        scheduleStart: /^\d{2}:\d{2}$/.test(patch.scheduleStart || '') ? patch.scheduleStart : (current.scheduleStart || '08:00'),
+        scheduleEnd: /^\d{2}:\d{2}$/.test(patch.scheduleEnd || '') ? patch.scheduleEnd : (current.scheduleEnd || '21:00'),
+        dailyLimit: Math.max(0, int(patch.dailyLimit, current.dailyLimit || 100)),
+        sendMode: ['Aman (bertahap)', 'Normal'].includes(patch.sendMode) ? patch.sendMode : (current.sendMode || 'Aman (bertahap)'),
+        autoReply: patch.autoReply === undefined ? Boolean(current.autoReply) : Boolean(patch.autoReply),
+        saveHistory: patch.saveHistory === undefined ? current.saveHistory !== false : Boolean(patch.saveHistory),
       };
       if (next.maxInterval < next.minInterval) next.maxInterval = next.minInterval;
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
