@@ -1,63 +1,12 @@
 (() => {
-  const logout = document.querySelector('#logout');
-  if (logout) {
-    const button = logout.cloneNode(true); logout.replaceWith(button);
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        const response = await fetch('/api/whatsapp/logout', { method: 'POST' });
-        if (!response.ok) throw new Error();
-        location.replace('/login');
-      } catch { button.disabled = false; alert('Logout gagal. Coba kembali.'); }
-    });
-  }
-  const root = document.querySelector('#page-content');
-  const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-  async function api(route, body) {
-    const response = await fetch(`/api/whatsapp/${route}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-    return data;
-  }
-  let timer;
-  function mount() {
-    if (location.hash !== '#inbox' || root.querySelector('#live-inbox')) return;
-    clearTimeout(timer);
-    root.innerHTML = '<section id="live-inbox" class="inbox-layout"><div class="conversation-list"><h2>Kotak Masuk</h2><label>Cari percakapan<input type="search" id="inbox-search"></label><div id="inbox-list"></div></div><div class="section"><h2 id="chat-name">Pilih percakapan</h2><p id="inbox-feedback" role="status"></p><div id="chat-messages" aria-live="polite"></div><form id="chat-compose" hidden><label>Pesan<textarea id="chat-text" maxlength="4000" required></textarea></label><button class="button" type="submit">Kirim pesan</button></form></div></section>';
-    const panel = root.querySelector('#live-inbox');
-    const list = panel.querySelector('#inbox-list'), history = panel.querySelector('#chat-messages');
-    const feedback = panel.querySelector('#inbox-feedback'), form = panel.querySelector('form');
-    let selected = '', conversations = [];
-    const drawList = () => {
-      const query = panel.querySelector('#inbox-search').value.toLowerCase();
-      list.innerHTML = '';
-      for (const item of conversations.filter(item => `${item.name} ${item.jid} ${item.text}`.toLowerCase().includes(query))) {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'button secondary';
-        button.textContent = `${item.name || item.jid.split('@')[0]}: ${item.text.slice(0, 80)}`;
-        button.addEventListener('click', async () => { selected = item.jid; panel.querySelector('#chat-name').textContent = item.name || item.jid.split('@')[0]; form.hidden = false; try { await drawThread(); } catch (error) { feedback.textContent = error.message; } });
-        list.append(button);
-      }
-      if (!conversations.length) list.textContent = 'Belum ada pesan. Hubungkan WhatsApp lalu kirim pesan ke nomor tertaut.';
-    };
-    const drawThread = async () => {
-      const jid = selected, items = await api(`messages?jid=${encodeURIComponent(jid)}`);
-      if (selected !== jid) return;
-      history.innerHTML = items.map(item => `<p><strong>${item.outgoing ? 'Anda' : escape(item.name || 'Kontak')}</strong><br>${escape(item.text)}<br><small>${escape(new Date(item.timestamp).toLocaleString('id-ID'))}</small></p>`).join('');
-    };
-    panel.querySelector('#inbox-search').addEventListener('input', drawList);
-    form.addEventListener('submit', async event => {
-      event.preventDefault(); const button = form.querySelector('button'); button.disabled = true;
-      try { await api('send', { phone: selected.split('@')[0], text: panel.querySelector('#chat-text').value }); panel.querySelector('#chat-text').value = ''; feedback.textContent = 'Pesan diserahkan ke WhatsApp.'; await drawThread(); }
-      catch (error) { feedback.textContent = error.message; }
-      finally { button.disabled = false; }
-    });
-    const refresh = async () => {
-      if (!panel.isConnected) return;
-      try { conversations = await api('conversations'); drawList(); if (selected) await drawThread(); }
-      catch (error) { feedback.textContent = error.message; }
-      timer = setTimeout(refresh, 5000);
-    };
-    refresh();
-  }
-  new MutationObserver(mount).observe(root, { childList: true }); mount();
+  const root=document.querySelector('#page-content'), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const api=async route=>{const r=await fetch(`/api/whatsapp/${route}`,{cache:'no-store'}),d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||`Gateway HTTP ${r.status}`);return d};let timer;
+  function mount(){if(location.hash!=='#inbox'||root.querySelector('#live-inbox'))return;clearTimeout(timer);root.innerHTML=`<section id="live-inbox" class="inbox-shell"><aside class="inbox-sidebar"><div class="inbox-heading"><div><h2>Kotak Masuk</h2><span id="inbox-count">0 percakapan</span></div><button class="icon-button" type="button" aria-label="Muat ulang" data-inbox-refresh>↻</button></div><div class="inbox-tabs"><button class="inbox-tab active" type="button">Semua</button><button class="inbox-tab" type="button">Belum dibaca</button></div><label class="inbox-search"><span>⌕</span><input id="inbox-search" type="search" placeholder="Cari percakapan…"></label><div id="inbox-list" class="inbox-list"><div class="inbox-loading">Memuat percakapan…</div></div></aside><section class="inbox-chat"><header class="chat-header"><div class="chat-avatar" id="chat-avatar">?</div><div><h2 id="chat-name">Pilih percakapan</h2><span id="chat-subtitle">Pilih pesan di sebelah kiri untuk mulai membalas</span></div><button class="icon-button" type="button" aria-label="Menu percakapan">⋮</button></header><div id="chat-messages" class="chat-messages"><div class="chat-empty"><div class="chat-empty-icon">⌁</div><strong>Belum ada percakapan dipilih</strong><span>Pesan WhatsApp masuk akan tampil di sini.</span></div></div><form id="chat-compose" class="chat-compose" hidden><textarea id="chat-text" rows="1" maxlength="4000" placeholder="Tulis pesan…" required></textarea><button class="send-button" type="submit" aria-label="Kirim pesan">➤</button></form><p id="inbox-feedback" class="inbox-feedback" role="status"></p></section></section>`;
+    const panel=root.querySelector('#live-inbox'),list=panel.querySelector('#inbox-list'),history=panel.querySelector('#chat-messages'),form=panel.querySelector('#chat-compose'),feedback=panel.querySelector('#inbox-feedback');let selected='',conversations=[];
+    const drawList=()=>{const q=panel.querySelector('#inbox-search').value.toLowerCase(),items=conversations.filter(x=>`${x.name} ${x.jid} ${x.text}`.toLowerCase().includes(q));panel.querySelector('#inbox-count').textContent=`${conversations.length} percakapan`;list.innerHTML=items.length?items.map(x=>{const name=x.name||x.jid.split('@')[0];return `<button class="conversation-row ${selected===x.jid?'selected':''}" type="button" data-jid="${esc(x.jid)}"><span class="conversation-avatar">${esc(name.slice(0,1).toUpperCase())}</span><span class="conversation-copy"><strong>${esc(name)}</strong><small>${esc(x.text||'Belum ada pesan')}</small></span><time>${x.timestamp?esc(new Date(x.timestamp).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})):''}</time></button>`}).join(''):`<div class="inbox-empty"><span class="empty-icon">⌁</span><strong>${q?'Percakapan tidak ditemukan':'Belum ada percakapan'}</strong><span>${q?'Coba kata kunci lain.':'Pesan WhatsApp masuk akan muncul di sini.'}</span></div>`};
+    const drawThread=async()=>{if(!selected)return;const jid=selected,items=await api(`messages?jid=${encodeURIComponent(jid)}`);if(jid!==selected)return;history.innerHTML=items.length?items.map(x=>`<div class="message-row ${x.outgoing?'outgoing':'incoming'}"><div class="message-bubble">${esc(x.text)}<small>${esc(new Date(x.timestamp).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}))}</small></div></div>`).join(''):'<div class="chat-empty"><strong>Belum ada pesan</strong></div>';history.scrollTop=history.scrollHeight};
+    list.addEventListener('click',async e=>{const row=e.target.closest('[data-jid]');if(!row)return;selected=row.dataset.jid;const item=conversations.find(x=>x.jid===selected),name=item?.name||selected.split('@')[0];panel.querySelector('#chat-name').textContent=name;panel.querySelector('#chat-subtitle').textContent=selected.split('@')[0];panel.querySelector('#chat-avatar').textContent=name.slice(0,1).toUpperCase();form.hidden=false;drawList();try{await drawThread()}catch(x){feedback.textContent=x.message}});panel.querySelector('#inbox-search').addEventListener('input',drawList);panel.querySelector('[data-inbox-refresh]').addEventListener('click',refresh);
+    form.addEventListener('submit',async e=>{e.preventDefault();const b=form.querySelector('button');b.disabled=true;try{const r=await fetch('/api/whatsapp/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:selected.split('@')[0],text:panel.querySelector('#chat-text').value})}),d=await r.json();if(!r.ok)throw Error(d.error||'Pesan gagal dikirim');panel.querySelector('#chat-text').value='';feedback.textContent='Pesan diserahkan ke WhatsApp.';await drawThread()}catch(x){feedback.textContent=x.message}finally{b.disabled=false}});
+    async function refresh(){if(!panel.isConnected)return;try{conversations=await api('conversations');drawList();if(selected)await drawThread()}catch(x){feedback.textContent=x.message}timer=setTimeout(refresh,5000)}refresh();
+  }new MutationObserver(mount).observe(root,{childList:true});mount();
 })();

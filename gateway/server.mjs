@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual, createHmac, randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, cp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -26,8 +27,31 @@ let retryAttempt = 0;
 let connectedAt = null;
 let lastClose = null;
 
-const { state, saveCreds } = await useMultiFileAuthState(process.env.SESSION_DIR || './session');
+const sessionDir = process.env.SESSION_DIR || './session';
+let auth = await useMultiFileAuthState(sessionDir);
+let state = auth.state;
+let saveCreds = auth.saveCreds;
 const hasSession = () => Boolean(state.creds?.me || state.creds?.registered);
+
+// Controlled re-pairing: archive the current linked-device credentials, then start
+// from a clean auth state. Never deletes the old session without a copy on disk.
+async function resetSession() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const archive = join(process.env.SESSION_BACKUP_DIR || join(sessionDir, '..', 'session-backups'), stamp);
+  await mkdir(archive, { recursive: true, mode: 0o700 });
+  for (const entry of await readdir(sessionDir)) {
+    if (entry === 'session-backups') continue;
+    await cp(join(sessionDir, entry), join(archive, entry), { recursive: true, force: true });
+  }
+  for (const entry of await readdir(sessionDir)) {
+    if (entry === 'session-backups') continue;
+    await rm(join(sessionDir, entry), { recursive: true, force: true });
+  }
+  auth = await useMultiFileAuthState(sessionDir);
+  state = auth.state;
+  saveCreds = auth.saveCreds;
+  return archive;
+}
 
 const loginAttempts = new Map();
 const equal = (a, b) => {
@@ -125,7 +149,9 @@ function connect() {
       const reason = update.lastDisconnect?.error?.message ?? 'unknown';
       lastClose = { code, at: Date.now(), reason: String(reason).slice(0, 200) };
       console.error(`WhatsApp connection closed: code=${code ?? 'unknown'} message=${String(reason).slice(0, 200)}`);
-      retire(current);
+      // The stream is already closed here. Calling end() again would send an extra
+      // close frame and can make WhatsApp unlink the freshly paired device.
+      try { current.ev.removeAllListeners(); } catch {}
       if (socket === current) socket = null;
 
       if (code === DisconnectReason.loggedOut) {
@@ -137,7 +163,7 @@ function connect() {
 
       status = 'disconnected';
       // 515 restart-required is expected right after a fresh pairing; reconnect quickly.
-      const delay = code === DisconnectReason.restartRequired ? 750 : Math.min(30000, 2000 * 2 ** retryAttempt++);
+      const delay = code === DisconnectReason.restartRequired ? 1500 : Math.min(30000, 2000 * 2 ** retryAttempt++);
       scheduleRetry(delay);
     }
   });
@@ -239,8 +265,22 @@ const server = createServer(async (req, res) => {
       send(res, 200, statusPayload()); return;
     }
 
-    if (method === 'GET' && path === '/conversations') { send(res, 200, messages.list()); return; }
-    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
+    if (method === 'POST' && path === '/re-pair') {
+      const body = await readJson(req, 4096);
+      if (body.confirm !== 'PAIRING-ULANG') { send(res, 400, { error: 'Konfirmasi "PAIRING-ULANG" diperlukan.' }); return; }
+      if (status === 'connected') { send(res, 409, { error: 'Koneksi masih aktif. Putuskan dulu sebelum pairing ulang.' }); return; }
+      connectionGeneration++;
+      if (socket) retire(socket);
+      socket = null;
+      clearTimeout(retry); retry = null;
+      const archived = await resetSession();
+      retryAttempt = 0; lastClose = null; connectedAt = null;
+      connect();
+      send(res, 200, { ...statusPayload(), archived });
+      return;
+    }
+
+    if (method === 'GET' && path === '/conversations') { send(res, 200, messages.list()); return; }    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
 
     if (method === 'POST' && path === '/send') {
       if (status !== 'connected' || !socket) { send(res, 409, { error: 'WhatsApp belum terhubung. Scan QR di Pengaturan.' }); return; }

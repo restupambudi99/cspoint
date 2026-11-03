@@ -62,20 +62,22 @@ async function loadSettings() {
 
 function dashboardPage() {
   content.innerHTML = [
+    `<div class="dashboard-welcome"><div><span class="eyebrow">Ringkasan workspace</span><h2>Selamat datang kembali 👋</h2><p>Kelola pesan WhatsApp dan aktivitas pelanggan dari satu tempat.</p></div><a class="button" href="#inbox">Buka Kotak Masuk</a></div>`,
     `<section class="stats">
-      <div class="stat"><span>Total percakapan</span><strong id="stat-total">–</strong></div>
-      <div class="stat"><span>Pesan terkirim</span><strong id="stat-sent">–</strong></div>
-      <div class="stat"><span>Status WhatsApp</span><strong id="stat-status">–</strong></div>
+      <div class="stat stat-orange"><span>Total percakapan</span><strong id="stat-total">–</strong><small>Riwayat tersimpan</small></div>
+      <div class="stat"><span>Pesan terkirim</span><strong id="stat-sent">–</strong><small>Dari dashboard</small></div>
+      <div class="stat"><span>Status WhatsApp</span><strong id="stat-status">–</strong><small>Pembaruan langsung</small></div>
     </section>`,
-    section('Kirim Pesan', 'Pesan dikirim lewat nomor WhatsApp yang tertaut.', `
+    `<div class="dashboard-grid">${section('Kirim Pesan', 'Pesan dikirim lewat nomor WhatsApp yang tertaut.', `
       <label class="field">Nomor WhatsApp<input id="phone" type="tel" placeholder="08xxx atau 628xxx"></label>
-      <label class="field">Pesan<textarea id="message" rows="5" maxlength="4000"></textarea></label>
-      <div class="section-actions"><button class="button" data-send-message>Kirim Pesan</button><p role="status" id="send-result" class="hint"></p></div>`),
+      <label class="field">Pesan<textarea id="message" rows="5" maxlength="4000" placeholder="Tulis pesan untuk pelanggan…"></textarea></label>
+      <div class="section-actions"><button class="button" data-send-message>Kirim Pesan</button><p role="status" id="send-result" class="hint"></p></div>`)}<section class="section recent-panel"><div class="section-head"><div><h2>Aktivitas terbaru</h2><p class="intro">Percakapan terakhir yang masuk.</p></div><a class="text-link" href="#inbox">Lihat semua</a></div><div id="recent-list" class="recent-list"><p class="empty compact">Memuat aktivitas…</p></div></section></div>`,
   ].join('');
   api('status').then(result => { document.querySelector('#stat-status').textContent = result.status; }).catch(() => {});
   api('conversations').then(items => {
     document.querySelector('#stat-total').textContent = items.length;
     document.querySelector('#stat-sent').textContent = items.filter(item => item.outgoing).length;
+    document.querySelector('#recent-list').innerHTML = items.slice(0, 5).map(item => `<a class="recent-row" href="#inbox"><span class="conversation-avatar">${esc((item.name || item.jid).slice(0, 1).toUpperCase())}</span><span><strong>${esc(item.name || item.jid.split('@')[0])}</strong><small>${esc(item.text || 'Belum ada pesan')}</small></span><time>${esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))}</time></a>`).join('') || '<p class="empty compact"><strong>Belum ada aktivitas</strong><span>Pesan terbaru akan muncul di sini.</span></p>';
   }).catch(() => {});
 }
 

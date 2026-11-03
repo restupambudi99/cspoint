@@ -4,7 +4,7 @@ import { once } from 'node:events';
 const token = 'test-only-token-00000000000000000000';
 const child = spawn(process.execPath, ['server.mjs'], {
   cwd: new URL('.', import.meta.url),
-  env: { ...process.env, GATEWAY_TOKEN: token, PORT: '18182', MESSAGE_DB: ':memory:' },
+  env: { ...process.env, GATEWAY_TOKEN: token, PORT: '18182', MESSAGE_DB: ':memory:', SESSION_DIR: 'test-session' },
   stdio: ['ignore', 'ignore', 'pipe'],
 });
 let errors = '';
@@ -89,6 +89,11 @@ try {
 
   result = await json('/settings', { method: 'POST', body: '{bad json' });
   assert.equal(result.code, 400);
+
+  // Re-pairing must never run without the explicit confirmation token.
+  result = await json('/re-pair', { method: 'POST', body: JSON.stringify({}) });
+  assert.equal(result.code, 400);
+  assert.match(result.body.error, /PAIRING-ULANG/);
 
   console.log('PASS: auth, idle status, unavailable QR, unknown route, send guard, settings/product/order/form/knowledge/agent persistence, validation');
 } finally {
