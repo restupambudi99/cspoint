@@ -18,3 +18,4 @@ inspect-mycopilot*.mjs
 extract-mycopilot*.mjs
 browser-round-*.mjs
 browser-login.mjs
+.taste-skill/
