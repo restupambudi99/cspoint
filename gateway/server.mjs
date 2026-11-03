@@ -304,7 +304,7 @@ const server = createServer(async (req, res) => {
       const listPath = `/${name}`;
       const itemPattern = new RegExp(`^/${name}/([A-Za-z0-9-]{1,64})$`);
       if (method === 'GET' && path === listPath) { send(res, 200, store[name].list()); return; }
-      if (method === 'POST' && path === listPath) { send(res, 200, store[name].create(await readJson(req))); return; }
+      if (method === 'POST' && path === listPath) { send(res, 200, store[name].create(await readJson(req, name === 'knowledge' ? 12000000 : 1000000))); return; }
       const item = path.match(itemPattern);
       if (method === 'DELETE' && item) {
         const removed = store[name].remove(item[1]);

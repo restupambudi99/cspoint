@@ -119,9 +119,10 @@ async function knowledgePanel() {
     const items = await api('knowledge');
     panel.innerHTML = `
       <form id="knowledge-form" class="form-grid">
-        <label class="field">Nama dokumen<input id="knowledge-name" required maxlength="160"></label>
-        <label class="field full">Isi teks hasil ekstraksi PDF<textarea id="knowledge-content" rows="6" required maxlength="200000"></textarea></label>
-        <div class="section-actions"><button class="button" type="submit">Simpan Knowledge</button><p role="status" id="knowledge-result" class="hint"></p></div>
+        <label class="field full">Upload dokumen PDF<input id="knowledge-file" type="file" accept="application/pdf,.pdf" required><span class="hint">PDF disimpan sebagai sumber pengetahuan untuk konfigurasi AI Agent. Maksimal 8 MB.</span></label>
+        <label class="field">Nama dokumen<input id="knowledge-name" maxlength="160" placeholder="Otomatis dari nama file"></label>
+        <div class="knowledge-dropzone" id="knowledge-dropzone"><strong>Knowledge PDF</strong><span>Pilih file PDF untuk mengajari AI tentang produk, layanan, atau SOP Anda.</span></div>
+        <div class="section-actions"><button class="button" type="submit">Upload & Simpan</button><p role="status" id="knowledge-result" class="hint"></p></div>
       </form>
       <div class="list">${items.map(item => `<article class="contact-row"><strong>${esc(item.name)}</strong><span>${esc(item.status)}</span><span>${esc(item.size)} karakter</span><button class="button secondary" data-domain-delete="knowledge/${esc(item.id)}">Hapus</button></article>`).join('') || '<p class="empty">Belum ada knowledge.</p>'}</div>`;
   } catch (error) {
@@ -283,7 +284,12 @@ content.addEventListener('submit', async event => {
     event.preventDefault();
     const target = document.querySelector('#knowledge-result');
     try {
-      await api('knowledge', post({ name: document.querySelector('#knowledge-name').value, content: document.querySelector('#knowledge-content').value, mime: 'text/plain' }));
+      const file = document.querySelector('#knowledge-file').files[0];
+      if (!file || file.type !== 'application/pdf') throw Error('Pilih file PDF yang valid.');
+      if (file.size > 8 * 1024 * 1024) throw Error('Ukuran PDF maksimal 8 MB.');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      await api('knowledge', post({ name: document.querySelector('#knowledge-name').value.trim() || file.name, content: btoa(binary), mime: 'application/pdf', originalSize: file.size }));
       await knowledgePanel();
       notify(document.querySelector('#knowledge-result'), 'Knowledge tersimpan.', 'ok');
     } catch (error) { notify(target, error.message, 'error'); }

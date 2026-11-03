@@ -92,8 +92,8 @@ export function openStore(path) {
         const name = text(input.name, 160);
         const content = String(input.content ?? '').trim();
         if (!name || !content) throw Object.assign(new Error('Nama dan isi knowledge wajib diisi'), { status: 400 });
-        if (content.length > 200000) throw Object.assign(new Error('Isi knowledge melebihi 200.000 karakter'), { status: 413 });
-        const row = { id: id(), name, content, mime: text(input.mime, 80) || 'text/plain', status: 'siap', created_at: now() };
+        if (content.length > 12000000) throw Object.assign(new Error('Isi knowledge melebihi batas 12 MB'), { status: 413 });
+        const row = { id: id(), name, content, mime: text(input.mime, 80) || 'text/plain', status: input.mime === 'application/pdf' ? 'PDF tersimpan' : 'siap', created_at: now() };
         db.prepare('INSERT INTO knowledge VALUES (?,?,?,?,?,?)').run(row.id, row.name, row.content, row.mime, row.status, row.created_at);
         return { id: row.id, name: row.name, mime: row.mime, status: row.status, created_at: row.created_at, size: content.length };
       },

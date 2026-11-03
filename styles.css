@@ -278,3 +278,5 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .hint[data-kind="ok"] { color: #1f7a45; }
 .hint[data-kind="error"] { color: #b3261e; }
 .list { display: grid; gap: 10px; margin-top: 20px; }
+.knowledge-dropzone { display: grid; align-content: center; gap: 7px; min-height: 118px; border: 1px dashed #f0a078; border-radius: 12px; background: #fff8f3; color: var(--muted); padding: 18px; }
+.knowledge-dropzone strong { color: var(--accent); font-size: 15px; }
