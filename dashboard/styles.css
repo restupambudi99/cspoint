@@ -511,3 +511,8 @@ input::file-selector-button { border: 0; border-radius: 4px; background: var(--a
   .modal-backdrop { padding: 16px; }
   .modal { padding: 20px; }
 }
+.wa-numbers { display: grid; gap: 14px; width: 100%; }
+.wa-number { display: grid; gap: 10px; justify-items: start; border: 1px solid var(--line); border-radius: 10px; background: var(--white); padding: 16px; min-width: 0; }
+.wa-number h3 { margin: 0; font-size: 1rem; }
+.wa-number p { margin: 0; }
+.conversation-number { font-size: .75rem; }

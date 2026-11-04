@@ -41,7 +41,7 @@ function section(heading, intro, body, action = '') {
 
 function settingsPage() {
   content.innerHTML = [
-    section('Nomor WhatsApp (Instance)', 'Satu nomor WhatsApp per gateway. Status di bawah dibaca langsung dari server.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat status koneksi…</p></div>'),
+    section('Nomor WhatsApp (Instance)', 'Hubungkan hingga 10 nomor. Semua nomor memakai AI Agent, jadwal, interval, dan batas harian yang sama.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat status koneksi…</p></div>'),
     section('Pengaturan Interval', 'Jeda antar balasan AI otomatis. Disimpan di database server.', `
       <div class="form-grid">
         <label class="field">Minimum (detik)<input id="set-min" type="number" min="1" max="600" value="2"></label>
@@ -92,10 +92,12 @@ function dashboardPage() {
       <div class="stat"><span>Status WhatsApp</span><strong id="stat-status">–</strong><small>Pembaruan langsung</small></div>
     </section>`,
     `<div class="dashboard-grid">${section('Kirim Pesan', 'Pesan dikirim lewat nomor WhatsApp yang tertaut.', `
+      <label class="field">Kirim dari<select id="send-number"><option value="">Nomor terhubung pertama</option></select></label>
       <label class="field">Nomor WhatsApp<input id="phone" type="tel" placeholder="08xxx atau 628xxx"></label>
       <label class="field">Pesan<textarea id="message" rows="5" maxlength="4000" placeholder="Tulis pesan untuk pelanggan…"></textarea></label>
       <div class="section-actions"><button class="button" data-send-message>Kirim Pesan</button><p role="status" id="send-result" class="hint"></p></div>`)}<section class="section recent-panel"><div class="section-head"><div><h2>Aktivitas terbaru</h2><p class="intro">Percakapan terakhir yang masuk.</p></div><a class="text-link" href="#inbox">Lihat semua</a></div><div id="recent-list" class="recent-list"><p class="empty compact">Memuat aktivitas…</p></div></section></div>`,
   ].join('');
+  api('numbers').then(({ numbers }) => { const select = document.querySelector('#send-number'); if (select) select.insertAdjacentHTML('beforeend', numbers.filter(item => item.status === 'connected').map(item => `<option value="${esc(item.id)}">${esc(item.label)} (${esc(item.phone)})</option>`).join('')); }).catch(() => {});
   api('status').then(result => { document.querySelector('#stat-status').textContent = result.status; }).catch(() => { const el = document.querySelector('#stat-status'); if (el) el.textContent = 'Gagal dimuat'; });
   api('conversations').then(items => {
     document.querySelector('#stat-total').textContent = items.length >= 200 ? '200+' : items.length;
@@ -337,7 +339,7 @@ content.addEventListener('click', async event => {
       if (!phone) { notify(target, INVALID_PHONE, 'error'); return; }
       button.disabled = true;
       try {
-        const sent = await api('send', post({ phone, text: document.querySelector('#message').value }));
+        const sent = await api('send', post({ phone, text: document.querySelector('#message').value, number: document.querySelector('#send-number').value || undefined }));
         notify(target, `Pesan diserahkan ke WhatsApp (${sent.status}).`, 'ok');
       } finally { button.disabled = false; }
     }

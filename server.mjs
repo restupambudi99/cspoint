@@ -1,7 +1,6 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual, createHmac, randomBytes } from 'node:crypto';
-import { readFile, readdir, mkdir, cp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -13,6 +12,7 @@ import { createAutoReply } from './auto-reply.mjs';
 import { extractKnowledgePdf } from './pdf-knowledge.mjs';
 import { readConversation } from './read-receipts.mjs';
 import { normalizeWaPhone, resolveWaJid } from './phone.mjs';
+import { openNumbers, MAX_NUMBERS } from './wa-numbers.mjs';
 
 const token = process.env.GATEWAY_TOKEN;
 if (!token || token.length < 32) throw new Error('GATEWAY_TOKEN must contain at least 32 characters');
@@ -47,43 +47,37 @@ const autoReply = createAutoReply({ store, config: aiConfig, router: aiRouter, m
   },
   onSuccess: () => { autoReplyFailure = null; },
 });
-const handleMcp = mcpHandler({ token: process.env.MCP_TOKEN, messages, getStatus: () => status });
+const live = (number, current) => number.socket === current && number.status === 'connected';
+const replyTo = (number, current, message) => autoReply(message, { isCurrent: () => live(number, current), send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, live(number, current) ? current : null, item.jid, [item.id], number.id) });
 
-let status = 'idle';
-let qr = null;
-let socket = null;
-let retry = null;
-let stopping = false;
-let connectionGeneration = 0;
-let retryAttempt = 0;
-let connectedAt = null;
-let lastClose = null;
-
-const sessionDir = process.env.SESSION_DIR || './session';
-let auth = await useMultiFileAuthState(sessionDir);
-let state = auth.state;
-let saveCreds = auth.saveCreds;
-const hasSession = () => Boolean(state.creds?.me || state.creds?.registered);
-
-// Controlled re-pairing: archive the current linked-device credentials, then start
-// from a clean auth state. Never deletes the old session without a copy on disk.
-async function resetSession() {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const archive = join(process.env.SESSION_BACKUP_DIR || join(sessionDir, '..', 'session-backups'), stamp);
-  await mkdir(archive, { recursive: true, mode: 0o700 });
-  for (const entry of await readdir(sessionDir)) {
-    if (entry === 'session-backups') continue;
-    await cp(join(sessionDir, entry), join(archive, entry), { recursive: true, force: true });
-  }
-  for (const entry of await readdir(sessionDir)) {
-    if (entry === 'session-backups') continue;
-    await rm(join(sessionDir, entry), { recursive: true, force: true });
-  }
-  auth = await useMultiFileAuthState(sessionDir);
-  state = auth.state;
-  saveCreds = auth.saveCreds;
-  return archive;
-}
+const numbers = await openNumbers({
+  sessionDir: process.env.SESSION_DIR || './session',
+  makeSocket: auth => makeWASocket({ auth, logger, markOnlineOnConnect: false, syncFullHistory: false }),
+  useAuth: useMultiFileAuthState,
+  closeCodes: DisconnectReason,
+  messages,
+  onMessages(number, current, batch) {
+    try {
+      for (const message of batch) {
+        const jid = message.key?.remoteJid;
+        const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
+        if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
+        const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now(), instance: number.id };
+        const fresh = store.settings().saveHistory ? messages.add(saved) : true;
+        if (!saved.outgoing && !numbers.owns(jid) && Math.abs(Date.now() - saved.timestamp) < 120000) {
+          void replyTo(number, current, fresh ? saved : messages.byId(saved.id));
+        }
+      }
+    } catch { console.error('Unable to persist incoming messages'); }
+  },
+  onOpen(number, current) {
+    for (const id of aiConfig.pendingReplies()) {
+      const message = messages.byId(id);
+      if (message && !message.outgoing && message.instance === number.id) void replyTo(number, current, message);
+    }
+  },
+});
+const handleMcp = mcpHandler({ token: process.env.MCP_TOKEN, messages, getStatus: () => numbers.primary().status });
 
 const loginAttempts = new Map();
 const equal = (a, b) => {
@@ -100,125 +94,7 @@ function sessionValid(cookie = '') {
 
 const loginHtml = `<!doctype html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Masuk Chat WA Bot</title><body><main><h1>Masuk Chat WA Bot</h1><p>Gunakan akun dashboard, bukan password SSH VPS.</p><form method="post" action="/login"><p><label>Username <input name="username" autocomplete="username" required value="admin"></label></p><p><label>Password <input type="password" name="password" autocomplete="current-password" required></label></p><button type="submit">Masuk dashboard</button></form></main></body></html>`;
 
-function statusPayload() {
-  return {
-    status,
-    connectedAt,
-    lastClose,
-    hasSession: hasSession(),
-    retryPending: Boolean(retry),
-    aiReplyFailure: autoReplyFailure,
-  };
-}
-
-function scheduleRetry(delay) {
-  if (stopping) return;
-  clearTimeout(retry);
-  retry = setTimeout(() => { retry = null; connect(); }, delay);
-}
-
-function retire(target) {
-  try { target.ev.removeAllListeners(); } catch {}
-  try { target.end(undefined); } catch {}
-}
-
-function connect() {
-  if (stopping) return;
-  const generation = ++connectionGeneration;
-  clearTimeout(retry);
-  retry = null;
-  qr = null;
-  status = 'connecting';
-
-  let current;
-  try {
-    current = makeWASocket({ auth: state, logger, markOnlineOnConnect: false, syncFullHistory: false });
-  } catch (error) {
-    status = 'disconnected';
-    lastClose = { code: null, at: Date.now(), reason: 'socket-init-failed' };
-    console.error(`WhatsApp socket could not start: ${error?.message ?? 'unknown'}`);
-    scheduleRetry(Math.min(30000, 2000 * 2 ** retryAttempt++));
-    return;
-  }
-
-  socket = current;
-  const isCurrent = () => generation === connectionGeneration && socket === current;
-  const replyTo = message => autoReply(message, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, isCurrent() && status === 'connected' ? current : null, item.jid, [item.id]) });
-
-  current.ev.on('creds.update', () => {
-    if (!isCurrent()) return;
-    saveCreds().catch(() => console.error('Unable to persist WhatsApp credentials'));
-  });
-
-  current.ev.on('messages.upsert', ({ messages: batch }) => {
-    if (!isCurrent()) return;
-    try {
-      for (const message of batch) {
-        const jid = message.key?.remoteJid;
-        const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
-        if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
-        const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
-        const fresh = store.settings().saveHistory ? messages.add(saved) : true;
-        if (!saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
-          void replyTo(fresh ? saved : messages.byId(saved.id));
-        }
-      }
-    } catch { console.error('Unable to persist incoming messages'); }
-  });
-
-  current.ev.on('messages.update', updates => {
-    if (!isCurrent()) return;
-    for (const { key, update } of updates) messages.updateReceipt(key, update.status);
-  });
-  current.ev.on('message-receipt.update', updates => {
-    if (!isCurrent()) return;
-    for (const { key, receipt } of updates) messages.updateReceipt(key, receipt.readTimestamp || receipt.playedTimestamp ? 4 : receipt.receiptTimestamp ? 3 : 0);
-  });
-
-  current.ev.on('connection.update', update => {
-    // A superseded socket must never overwrite the state owned by the newest socket.
-    if (!isCurrent()) return;
-
-    if (update.qr) { qr = update.qr; status = 'awaiting_scan'; }
-
-    if (update.connection === 'open') {
-      qr = null;
-      status = 'connected';
-      connectedAt = Date.now();
-      retryAttempt = 0;
-      lastClose = null;
-      console.error('WhatsApp connection open');
-      for (const id of aiConfig.pendingReplies()) {
-        const message = messages.byId(id);
-        if (message && !message.outgoing) void replyTo(message);
-      }
-    }
-
-    if (update.connection === 'close') {
-      qr = null;
-      const code = update.lastDisconnect?.error?.output?.statusCode ?? null;
-      const reason = update.lastDisconnect?.error?.message ?? 'unknown';
-      lastClose = { code, at: Date.now(), reason: String(reason).slice(0, 200) };
-      console.error(`WhatsApp connection closed: code=${code ?? 'unknown'} message=${String(reason).slice(0, 200)}`);
-      // The stream is already closed here. Calling end() again would send an extra
-      // close frame and can make WhatsApp unlink the freshly paired device.
-      try { current.ev.removeAllListeners(); } catch {}
-      if (socket === current) socket = null;
-
-      if (code === DisconnectReason.loggedOut) {
-        status = 'logged_out';
-        console.error('WhatsApp session logged out; controlled re-pairing required');
-        return;
-      }
-      if (stopping) { status = 'idle'; return; }
-
-      status = 'disconnected';
-      // 515 restart-required is expected right after a fresh pairing; reconnect quickly.
-      const delay = code === DisconnectReason.restartRequired ? 1500 : Math.min(30000, 2000 * 2 ** retryAttempt++);
-      scheduleRetry(delay);
-    }
-  });
-}
+const statusPayload = number => ({ ...number.view(), aiReplyFailure: autoReplyFailure });
 
 async function readJson(req, limit = 1_000_000) {
   let raw = '';
@@ -229,6 +105,9 @@ async function readJson(req, limit = 1_000_000) {
   if (!raw) return {};
   try { return JSON.parse(raw); } catch { throw Object.assign(new Error('JSON tidak valid'), { status: 400 }); }
 }
+
+// A customer is answered from the number they last wrote to; if that slot is gone, from any connected number.
+const ownerOf = jid => { const id = messages.numberFor(jid); return numbers.has(id) ? numbers.get(id) : numbers.primary(); };
 
 const send = (res, code, payload) => { res.writeHead(code); res.end(JSON.stringify(payload)); };
 
@@ -298,42 +177,36 @@ const server = createServer(async (req, res) => {
     const path = url.pathname;
     const method = req.method;
 
-    if (method === 'GET' && path === '/status') { send(res, 200, statusPayload()); return; }
+    const selected = () => numbers.get(url.searchParams.get('number') || 'default');
+
+    if (method === 'GET' && path === '/status') { send(res, 200, statusPayload(url.searchParams.has('number') ? selected() : numbers.primary())); return; }
 
     if (method === 'GET' && path === '/qr') {
-      if (!qr) { send(res, 409, statusPayload()); return; }
-      send(res, 200, { image: await QRCode.toDataURL(qr) }); return;
+      const number = selected();
+      if (!number.qr) { send(res, 409, statusPayload(number)); return; }
+      send(res, 200, { image: await QRCode.toDataURL(number.qr) }); return;
     }
+
+    if (method === 'GET' && path === '/numbers') { send(res, 200, { numbers: numbers.list().map(number => number.view()), max: MAX_NUMBERS }); return; }
+    if (method === 'POST' && path === '/numbers') { send(res, 200, (await numbers.add()).view()); return; }
 
     if (method === 'POST' && path === '/connect') {
-      if (status === 'logged_out') { send(res, 409, { ...statusPayload(), error: 'Sesi keluar. Pairing ulang terkontrol diperlukan.' }); return; }
-      if (status === 'connected' || status === 'connecting') { send(res, 200, statusPayload()); return; }
-      if (status === 'awaiting_scan') {
-        // Force a fresh QR on the same socket generation.
-        connectionGeneration++; qr = null; if (socket) retire(socket); socket = null;
-      }
-      connect();
-      send(res, 200, statusPayload()); return;
+      const number = selected();
+      await number.request();
+      send(res, 200, statusPayload(number)); return;
     }
 
-    if (method === 'POST' && path === '/re-pair') {
+    if (method === 'POST' && path === '/disconnect') {
       const body = await readJson(req, 4096);
-      if (body.confirm !== 'PAIRING-ULANG') { send(res, 400, { error: 'Konfirmasi "PAIRING-ULANG" diperlukan.' }); return; }
-      const previous = socket, wasConnected = status === 'connected';
-      connectionGeneration++;
-      socket = null;
-      clearTimeout(retry); retry = null;
-      // Unlink on WhatsApp too, otherwise the old device stays listed on the phone.
-      if (previous && wasConnected) await Promise.race([previous.logout(), new Promise(resolve => setTimeout(resolve, 10000))]).catch(() => {});
-      if (previous) retire(previous);
-      const archived = await resetSession();
-      retryAttempt = 0; lastClose = null; connectedAt = null;
-      connect();
-      send(res, 200, { ...statusPayload(), archived });
-      return;
+      if (body.confirm !== 'PUTUSKAN') { send(res, 400, { error: 'Konfirmasi "PUTUSKAN" diperlukan.' }); return; }
+      send(res, 200, await numbers.disconnect(selected().id)); return;
     }
 
-    if (method === 'GET' && path === '/conversations') { send(res, 200, messages.list()); return; }    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
+    if (method === 'GET' && path === '/conversations') {
+      const several = numbers.list().length > 1;
+      send(res, 200, messages.list().map(row => ({ ...row, numberLabel: several && numbers.has(row.instance) ? numbers.get(row.instance).label : '' }))); return;
+    }
+    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
 
     if (method === 'GET' && path === '/labels') { send(res, 200, messages.labels()); return; }
     if (method === 'POST' && path === '/labels') { send(res, 200, messages.saveLabel(await readJson(req, 4000))); return; }
@@ -350,12 +223,15 @@ const server = createServer(async (req, res) => {
     }
     if (method === 'POST' && path === '/conversations/read') {
       const body = await readJson(req, 50000);
-      send(res, 200, await readConversation(messages, status === 'connected' ? socket : null, body.jid, body.ids)); return;
+      const owner = ownerOf(body.jid);
+      send(res, 200, await readConversation(messages, owner.status === 'connected' ? owner.socket : null, body.jid, body.ids, owner.id)); return;
     }
 
     if (method === 'POST' && path === '/send') {
-      if (status !== 'connected' || !socket) { send(res, 409, { error: 'WhatsApp belum terhubung. Scan QR di Pengaturan.' }); return; }
       const body = await readJson(req, 200000);
+      const sender = typeof body.number === 'string' ? numbers.get(body.number) : body.jid === undefined ? numbers.primary() : ownerOf(body.jid);
+      const socket = sender.status === 'connected' ? sender.socket : null;
+      if (!socket) { send(res, 409, { error: `${numbers.list().length > 1 ? sender.label : 'WhatsApp'} belum terhubung. Scan QR di Pengaturan.` }); return; }
       const phone = normalizeWaPhone(body.phone);
       const text = typeof body.text === 'string' ? body.text.trim() : '';
       if (!text || text.length > 4000) { send(res, 400, { error: 'Pesan wajib diisi, maksimal 4.000 karakter.' }); return; }
@@ -367,7 +243,7 @@ const server = createServer(async (req, res) => {
         if (!jid) { send(res, 400, { error: 'Nomor tidak terdaftar di WhatsApp.' }); return; }
       } else if (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid)) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
       const result = await socket.sendMessage(jid, { text });
-      if (store.settings().saveHistory) messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now() });
+      if (store.settings().saveHistory) messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now(), instance: sender.id });
       send(res, 200, { id: result.key.id, status: 'submitted' }); return;
     }
 
@@ -431,14 +307,10 @@ const server = createServer(async (req, res) => {
 
 server.listen(Number(process.env.PORT || 18181), '127.0.0.1');
 
-// A saved linked-device session must reconnect after a service restart.
-// Baileys only sets creds.registered during pairing-code linking, so the presence
-// of creds.me is the reliable signal that a QR-paired session already exists.
-if (hasSession()) connect();
+void numbers.start();
 
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
-  stopping = true; clearTimeout(retry); retry = null;
-  if (socket) retire(socket);
+  numbers.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();
 });

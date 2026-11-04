@@ -13,6 +13,7 @@ export function openMessages(path) {
     CREATE TABLE IF NOT EXISTS inbox_meta (key TEXT PRIMARY KEY);`);
   const columns = new Set(db.prepare('PRAGMA table_info(messages)').all().map(row => row.name));
   for (const column of ['read_at', 'receipt_sent_at']) if (!columns.has(column)) db.exec(`ALTER TABLE messages ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
+  if (!columns.has('instance')) db.exec("ALTER TABLE messages ADD COLUMN instance TEXT NOT NULL DEFAULT 'default'");
   if (!db.prepare('SELECT 1 FROM inbox_meta WHERE key=?').get('labels-seeded')) {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -25,14 +26,14 @@ export function openMessages(path) {
   const requireConversation = jid => { if (typeof jid !== 'string' || !hasConversation(jid)) throw invalid('Percakapan tidak ditemukan.'); };
   return {
     add(message) {
-      const inserted = db.prepare('INSERT OR IGNORE INTO messages (id,jid,name,text,outgoing,timestamp) VALUES (?,?,?,?,?,?)').run(message.id, message.jid, message.name || '', message.text, message.outgoing ? 1 : 0, message.timestamp).changes > 0;
+      const inserted = db.prepare('INSERT OR IGNORE INTO messages (id,jid,name,text,outgoing,timestamp,instance) VALUES (?,?,?,?,?,?,?)').run(message.id, message.jid, message.name || '', message.text, message.outgoing ? 1 : 0, message.timestamp, message.instance || 'default').changes > 0;
       if (message.outgoing || Number.isInteger(message.status)) this.updateReceipt({ remoteJid: message.jid, id: message.id, fromMe: Boolean(message.outgoing) }, message.status ?? 1);
       const receipt = db.prepare('SELECT status FROM message_status WHERE jid=? AND id=?').get(message.jid, message.id);
       if (!message.outgoing && receipt?.status >= 4) this.markRead(message.jid, [message.id], true);
       return inserted;
     },
     list() {
-      const rows = db.prepare(`SELECT m.id,m.jid,m.text,m.outgoing,m.timestamp,
+      const rows = db.prepare(`SELECT m.id,m.jid,m.text,m.outgoing,m.timestamp,m.instance,
         COALESCE((SELECT n.name FROM messages n WHERE n.jid=m.jid AND n.outgoing=0 AND n.name<>'' ORDER BY n.timestamp DESC,n.rowid DESC LIMIT 1),'') AS name,
         MAX((SELECT count(*) FROM messages n WHERE n.jid=m.jid AND n.outgoing=0 AND n.read_at=0),COALESCE(s.force_unread,0)) AS unreadCount
         FROM messages m LEFT JOIN conversation_state s ON s.jid=m.jid
@@ -46,12 +47,16 @@ export function openMessages(path) {
         (SELECT rowid AS sequence,* FROM messages WHERE jid=? ORDER BY timestamp DESC,rowid DESC LIMIT 200) m
         LEFT JOIN message_status s ON s.jid=m.jid AND s.id=m.id ORDER BY m.timestamp,m.sequence`).all(jid);
     },
-    byId(messageId) { return db.prepare('SELECT id,jid,name,text,outgoing,timestamp FROM messages WHERE id=?').get(messageId); },
-    readKeys(jid, ids) {
+    byId(messageId) { return db.prepare('SELECT id,jid,name,text,outgoing,timestamp,instance FROM messages WHERE id=?').get(messageId); },
+    numberFor(jid) {
+      if (typeof jid !== 'string') return 'default';
+      return db.prepare('SELECT instance FROM messages WHERE jid=? ORDER BY outgoing,timestamp DESC,rowid DESC LIMIT 1').get(jid)?.instance || 'default';
+    },
+    readKeys(jid, ids, instance) {
       requireConversation(jid);
       if (!Array.isArray(ids) || ids.length > 200 || ids.some(id => typeof id !== 'string' || id.length > 200)) throw invalid('Daftar pesan tidak valid.');
-      const find = db.prepare('SELECT id,jid FROM messages WHERE id=? AND jid=? AND outgoing=0 AND receipt_sent_at=0');
-      return [...new Set(ids)].map(id => find.get(id, jid)).filter(Boolean).map(row => ({ remoteJid: row.jid, id: row.id, fromMe: false }));
+      const find = db.prepare('SELECT id,jid,instance FROM messages WHERE id=? AND jid=? AND outgoing=0 AND receipt_sent_at=0');
+      return [...new Set(ids)].map(id => find.get(id, jid)).filter(row => row && (!instance || row.instance === instance)).map(row => ({ remoteJid: row.jid, id: row.id, fromMe: false }));
     },
     markRead(jid, ids, receiptSent = false) {
       const update = db.prepare('UPDATE messages SET read_at=CASE WHEN read_at=0 THEN ? ELSE read_at END,receipt_sent_at=CASE WHEN ? THEN ? ELSE receipt_sent_at END WHERE jid=? AND id=? AND outgoing=0');

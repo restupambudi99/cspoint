@@ -123,10 +123,15 @@ try {
   result = await json('/settings', { method: 'POST', body: '{bad json' });
   assert.equal(result.code, 400);
 
-  // Re-pairing must never run without the explicit confirmation token.
-  result = await json('/re-pair', { method: 'POST', body: JSON.stringify({}) });
+  // Disconnecting must never run without the explicit confirmation token.
+  result = await json('/disconnect', { method: 'POST', body: JSON.stringify({}) });
   assert.equal(result.code, 400);
-  assert.match(result.body.error, /PAIRING-ULANG/);
+  assert.match(result.body.error, /PUTUSKAN/);
+  result = await json('/disconnect?number=n9', { method: 'POST', body: JSON.stringify({ confirm: 'PUTUSKAN' }) });
+  assert.equal(result.code, 404);
+  result = await json('/numbers');
+  assert.equal(result.body.max, 10);
+  assert.deepEqual(result.body.numbers.map(item => item.id), ['default']);
 
   console.log('PASS: auth, idle status, unavailable QR, unknown route, send guard, settings/product/order/form/knowledge/agent persistence, validation');
 } finally {

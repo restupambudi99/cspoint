@@ -1,5 +1,5 @@
-export async function readConversation(messages, socket, jid, ids) {
-  const keys = messages.readKeys(jid, ids);
+export async function readConversation(messages, socket, jid, ids, instance) {
+  const keys = messages.readKeys(jid, ids, instance);
   messages.markRead(jid, ids);
   if (!keys.length) return { read: true, receiptPending: false };
   if (!socket) return { read: true, receiptPending: true };

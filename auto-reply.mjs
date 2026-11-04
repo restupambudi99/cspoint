@@ -46,7 +46,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         if (!connection.isCurrent() || !allowed() || store.agent('default').updatedAt !== agent.updatedAt || config.publicConfig().updatedAt !== provider.updatedAt) { config.deferReply(message.id); return; }
         const result = await connection.send(message.jid, { text });
         lastSentAt = now().getTime();
-        if (store.settings().saveHistory) messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime() });
+        if (store.settings().saveHistory) messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime(), instance: message.instance });
         config.finishReply(message.id);
         deliveryAttempts.delete(message.id);
         if (usedFallback) onError(Object.assign(new Error('AI tidak tersedia; pesan bantuan otomatis sudah dikirim.'), { status: error?.status || 502, fallbackSent: true }));
