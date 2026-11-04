@@ -149,7 +149,7 @@ function connect() {
     saveCreds().catch(() => console.error('Unable to persist WhatsApp credentials'));
   });
 
-  current.ev.on('messages.upsert', ({ messages: batch, type }) => {
+  current.ev.on('messages.upsert', ({ messages: batch }) => {
     if (!isCurrent()) return;
     try {
       for (const message of batch) {
@@ -158,7 +158,7 @@ function connect() {
         if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
         const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
         const fresh = messages.add(saved);
-        if (type === 'notify' && !saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
+        if (!saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
           void replyTo(fresh ? saved : messages.byId(saved.id));
         }
       }

@@ -1,6 +1,7 @@
 const dayInJakarta = date => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(date);
 export function createAutoReply({ store, config, router, messages, buildMessages, onError = () => {}, onSuccess = () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = () => new Date() }) {
   let chain = Promise.resolve(), lastSentAt = 0;
+  const deliveryAttempts = new Map();
   const allowed = () => store.agent('default').enabled && store.settings().autoReply && config.publicConfig().hasApiKey;
   return (message, connection) => {
     if (!allowed() || message.outgoing) return Promise.resolve();
@@ -35,10 +36,17 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         lastSentAt = now().getTime();
         messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime() });
         config.finishReply(message.id);
+        deliveryAttempts.delete(message.id);
         if (usedFallback) onError(Object.assign(new Error('AI tidak tersedia; pesan bantuan otomatis sudah dikirim.'), { status: error?.status || 502, fallbackSent: true }));
         else onSuccess();
       } catch (error) {
         config.deferReply(message.id);
+        if (connection.isCurrent() && allowed() && (!Number.isInteger(error?.status) || error.status >= 500 || [408, 429].includes(error.status))) {
+          const attempt = Math.min((deliveryAttempts.get(message.id) || 0) + 1, 6);
+          deliveryAttempts.set(message.id, attempt);
+          const timer = setTimeout(() => { void autoReply(message, connection); }, Math.min(60000, 1000 * 2 ** attempt));
+          timer.unref?.();
+        }
         onError(error);
       }
     }).catch(error => onError(error));
