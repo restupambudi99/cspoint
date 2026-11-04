@@ -29,8 +29,8 @@ const pair = async (socket, phone) => {
   socket.ev.emit('connection.update', { connection: 'open' });
 };
 const close = (socket, statusCode) => socket.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode }, message: 'x' } } });
-const opened = [], received = [];
-const open = (options = {}) => openNumbers({ sessionDir, makeSocket, useAuth, closeCodes: { loggedOut: 401, restartRequired: 515 }, messages: { updateReceipt() {} }, onMessages: (number, socket, batch) => received.push([number.id, batch]), onOpen: number => opened.push(number.id), logoutTimeout: 20, ...options });
+const opened = [], received = [], renamed = [];
+const open = (options = {}) => openNumbers({ sessionDir, makeSocket, useAuth, closeCodes: { loggedOut: 401, restartRequired: 515 }, messages: { updateReceipt() {}, renameNumber: (from, to) => renamed.push([from, to]) }, onMessages: (number, socket, batch) => received.push([number.id, batch]), onOpen: number => opened.push(number.id), logoutTimeout: 20, ...options });
 const tick = () => new Promise(resolve => setTimeout(resolve, 5));
 
 let numbers = await open();
@@ -150,6 +150,23 @@ assert.deepEqual(numbers.list().map(item => item.status), ['connecting', 'connec
 assert.equal(numbers.get('n2').phone, '6284444');
 numbers.close();
 
+// A session paired on the interim build moves to a free slot with its messages; an unpaired one stays put
+const interimDir = join(root, 'instances');
+await mkdir(join(interimDir, 'uuid-paired'), { recursive: true });
+await writeFile(join(interimDir, 'uuid-paired', 'creds.json'), JSON.stringify({ me: { id: '6285555:3@s.whatsapp.net' } }));
+await writeFile(join(interimDir, 'uuid-paired', 'session-1.json'), '{}');
+await mkdir(join(interimDir, 'uuid-empty'), { recursive: true });
+numbers = await open();
+assert.deepEqual(renamed, [['uuid-paired', 'n4']]);
+assert.equal(numbers.get('n4').phone, '6285555');
+assert.equal(numbers.get('n4').hasSession, true);
+assert.ok((await readdir(join(root, 'numbers', 'n4'))).includes('session-1.json'));
+assert.deepEqual(await readdir(interimDir), ['uuid-empty']);
+numbers.close();
+numbers = await open();
+assert.equal(renamed.length, 1, 'moving is done once');
+numbers.close();
+
 // Messages remember their number, on a legacy database too
 const dbPath = join(root, 'legacy.sqlite');
 const legacy = new DatabaseSync(dbPath);
@@ -179,6 +196,8 @@ interim.exec("CREATE TABLE messages (id TEXT PRIMARY KEY, jid TEXT NOT NULL, nam
 interim.close();
 const migrated = openMessages(interimPath);
 assert.equal(migrated.byId('a').instance, 'n5');
+migrated.renameNumber('n5', 'n6');
+assert.equal(migrated.byId('a').instance, 'n6');
 assert.equal(migrated.list()[0].unreadCount, 1);
 migrated.markRead(jid, ['a']);
 migrated.markUnread(jid);

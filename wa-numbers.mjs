@@ -1,4 +1,4 @@
-import { readdir, mkdir, cp, rm } from 'node:fs/promises';
+import { readdir, mkdir, cp, rm, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const MAX_NUMBERS = 10;
@@ -202,6 +202,21 @@ export async function openNumbers({ sessionDir, makeSocket, useAuth, closeCodes,
     catch (error) { slots.delete(number.id); throw error; }
     number.connect();
     return number;
+  }
+
+  // Sessions paired on the interim build sit in instances/<uuid>; give them a slot so they need no new scan.
+  const interimDir = join(sessionDir, '..', 'instances');
+  for (const entry of await readdir(interimDir).catch(() => [])) {
+    const dir = join(interimDir, entry);
+    if (!(await useAuth(dir)).state.creds?.me) continue;
+    const taken = await readdir(numbersDir).catch(() => []);
+    let slot = 2;
+    while (taken.includes(`n${slot}`)) slot++;
+    if (slot > MAX_NUMBERS) break;
+    await mkdir(numbersDir, { recursive: true, mode: 0o700 });
+    messages.renameNumber(entry, `n${slot}`);
+    await rename(dir, join(numbersDir, `n${slot}`));
+    console.error(`WhatsApp session moved to slot n${slot}`);
   }
 
   const main = createNumber('default', sessionDir);

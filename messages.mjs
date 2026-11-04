@@ -60,6 +60,7 @@ export function openMessages(path) {
         LEFT JOIN message_status s ON s.jid=m.jid AND s.id=m.id ORDER BY m.timestamp,m.sequence`).all(jid);
     },
     byId(messageId) { return db.prepare('SELECT id,jid,name,text,outgoing,timestamp,instance FROM messages WHERE id=?').get(messageId); },
+    renameNumber(from, to) { db.prepare('UPDATE messages SET instance=? WHERE instance=?').run(to, from); },
     numberFor(jid) {
       if (typeof jid !== 'string') return 'default';
       return db.prepare('SELECT instance FROM messages WHERE jid=? ORDER BY outgoing,timestamp DESC,rowid DESC LIMIT 1').get(jid)?.instance || 'default';
