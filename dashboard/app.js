@@ -11,6 +11,7 @@ async function api(path, options = {}) {
     headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) },
   });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) location.href = '/login';
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
   return data;
 }
@@ -18,6 +19,13 @@ const post = body => ({ method: 'POST', body: JSON.stringify(body) });
 const MAX_KNOWLEDGE_PDF_CHARS = 500000;
 const MAX_KNOWLEDGE_PDF_BYTES = 8 * 1024 * 1024;
 const MAX_SHIPPING_PDF_BYTES = 1000000;
+const INVALID_PHONE = 'Nomor WhatsApp tidak valid. Gunakan format 08xxx atau 628xxx.';
+// Same rule as normalizeWaPhone in store.mjs.
+function normalizePhone(value) {
+  const digits = String(value ?? '').replace(/\D/g, '').replace(/^0/, '62').replace(/^8/, '628');
+  return /^628\d{7,11}$/.test(digits) ? digits : '';
+}
+const priceText = value => (value !== '' && Number.isFinite(Number(value)) ? `Rp ${Number(value).toLocaleString('id-ID')}` : String(value));
 
 function notify(element, message, kind = 'info') {
   if (!element) return;
@@ -88,12 +96,12 @@ function dashboardPage() {
       <label class="field">Pesan<textarea id="message" rows="5" maxlength="4000" placeholder="Tulis pesan untuk pelanggan…"></textarea></label>
       <div class="section-actions"><button class="button" data-send-message>Kirim Pesan</button><p role="status" id="send-result" class="hint"></p></div>`)}<section class="section recent-panel"><div class="section-head"><div><h2>Aktivitas terbaru</h2><p class="intro">Percakapan terakhir yang masuk.</p></div><a class="text-link" href="#inbox">Lihat semua</a></div><div id="recent-list" class="recent-list"><p class="empty compact">Memuat aktivitas…</p></div></section></div>`,
   ].join('');
-  api('status').then(result => { document.querySelector('#stat-status').textContent = result.status; }).catch(() => {});
+  api('status').then(result => { document.querySelector('#stat-status').textContent = result.status; }).catch(() => { const el = document.querySelector('#stat-status'); if (el) el.textContent = 'Gagal dimuat'; });
   api('conversations').then(items => {
     document.querySelector('#stat-total').textContent = items.length >= 200 ? '200+' : items.length;
     document.querySelector('#stat-sent').textContent = items.filter(item => item.outgoing).length;
     document.querySelector('#recent-list').innerHTML = items.slice(0, 5).map(item => `<a class="recent-row" href="#inbox"><span class="conversation-avatar">${esc((item.name || item.jid).slice(0, 1).toUpperCase())}</span><span><strong>${esc(item.name || item.jid.split('@')[0])}</strong><small>${esc(item.text || 'Belum ada pesan')}</small></span><time>${esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))}</time></a>`).join('') || '<p class="empty compact"><strong>Belum ada aktivitas</strong><span>Pesan terbaru akan muncul di sini.</span></p>';
-  }).catch(() => {});
+  }).catch(error => { const el = document.querySelector('#recent-list'); if (el) el.innerHTML = `<p class="empty compact">Gagal memuat aktivitas: ${esc(error.message)}</p>`; });
 }
 
 /* ------------------------------------------------------------------ AI Agent */
@@ -208,11 +216,11 @@ function ordersPage() {
 async function loadOrders() { const list = document.querySelector('#order-list'); try { const items = await api('orders'); window.__orders = items; for (const [id, status] of [['order-all','all'],['order-waiting','Menunggu Bayar'],['order-process','Diproses'],['order-done','Selesai']]) document.querySelector(`#${id}`).textContent = status === 'all' ? items.length : items.filter(x => x.status === status).length; drawOrders('all'); } catch (e) { list.innerHTML = `<p class="empty">Gagal memuat pesanan: ${esc(e.message)}</p>`; } }
 function drawOrders(filter) { const list = document.querySelector('#order-list'); const q = (document.querySelector('#order-search')?.value || '').toLowerCase(); const items = (window.__orders || []).filter(x => (filter === 'all' || x.status === filter) && `${x.customer} ${x.phone} ${x.status}`.toLowerCase().includes(q)); list.innerHTML = items.length ? items.map(x => `<article class="order-card"><span class="order-avatar">${esc((x.customer || '?').slice(0,1).toUpperCase())}</span><div class="order-main"><strong>${esc(x.customer)}</strong><span>${esc(x.phone || 'Nomor belum diisi')} · ${esc(new Date(x.created_at).toLocaleDateString('id-ID'))}</span></div><strong class="order-total">Rp ${Number(x.total || 0).toLocaleString('id-ID')}</strong><span class="order-badge status-${esc((x.status || '').toLowerCase().replaceAll(' ','-'))}">${esc(x.status)}</span><button class="button secondary" data-domain-delete="orders/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada pesanan</strong><span>Pesanan baru akan muncul di daftar ini.</span></p>'; }
 function productsPage() {
-  content.innerHTML = `<div class="products-page"><div class="products-intro"><div><h2>Produk</h2><p>Kelola katalog produk yang dipakai AI Agent dan pesanan.</p></div><button class="button" data-focus-product-form>+ Tambah Produk</button></div><div class="product-summary"><div><strong id="product-count">0</strong><span>Total Produk</span></div><div><strong id="product-stock">0</strong><span>Total Stok</span></div><div><strong id="product-value">Rp 0</strong><span>Nilai Inventori</span></div></div><section class="section product-create" id="product-create"><div class="section-head"><div><h2>Tambah Produk</h2><p class="intro">Masukkan informasi produk untuk katalog.</p></div></div><form class="form-grid" data-domain-form="products"><label class="field">Nama produk *<input name="name" required></label><label class="field">SKU<input name="sku" placeholder="SKU-001"></label><label class="field">Harga<input name="price" type="number" min="0" placeholder="0"></label><label class="field">Stok<input name="stock" type="number" min="0" placeholder="0"></label><label class="field full">Deskripsi<textarea name="description" rows="3" maxlength="2000" placeholder="Deskripsi singkat produk"></textarea></label><div class="section-actions"><button class="button" type="submit">Simpan Produk</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section product-list-section"><div class="section-head"><div><h2>Daftar Produk</h2><p class="intro">Katalog terbaru tersimpan di server.</p></div><input class="product-search" id="product-search" placeholder="Cari produk atau SKU…"></div><div id="product-list" class="product-list"><p class="empty">Memuat produk…</p></div></section></div>`;
+  content.innerHTML = `<div class="products-page"><div class="products-intro"><div><h2>Produk</h2><p>Kelola katalog produk yang dipakai AI Agent dan pesanan.</p></div><button class="button" data-focus-product-form>+ Tambah Produk</button></div><div class="product-summary"><div><strong id="product-count">0</strong><span>Total Produk</span></div><div><strong id="product-stock">0</strong><span>Total Stok</span></div><div><strong id="product-value">Rp 0</strong><span>Nilai Inventori</span></div></div><section class="section product-create" id="product-create"><div class="section-head"><div><h2>Tambah Produk</h2><p class="intro">Masukkan informasi produk untuk katalog.</p></div></div><form class="form-grid" data-domain-form="products"><label class="field">Nama produk *<input name="name" required></label><label class="field">SKU<input name="sku" placeholder="SKU-001"></label><label class="field">Harga<input name="price" maxlength="240" placeholder="150000 atau daftar harga paket"></label><label class="field">Stok<input name="stock" type="number" min="0" placeholder="0"></label><label class="field full">Deskripsi<textarea name="description" rows="3" maxlength="2000" placeholder="Deskripsi singkat produk"></textarea></label><div class="section-actions"><button class="button" type="submit">Simpan Produk</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section product-list-section"><div class="section-head"><div><h2>Daftar Produk</h2><p class="intro">Katalog terbaru tersimpan di server.</p></div><input class="product-search" id="product-search" placeholder="Cari produk atau SKU…"></div><div id="product-list" class="product-list"><p class="empty">Memuat produk…</p></div></section></div>`;
   document.querySelector('#product-search').addEventListener('input', () => drawProducts()); loadProducts();
 }
-async function loadProducts() { try { const items = await api('products'); window.__products = items; document.querySelector('#product-count').textContent = items.length; document.querySelector('#product-stock').textContent = items.reduce((n,x) => n + Number(x.stock || 0), 0).toLocaleString('id-ID'); document.querySelector('#product-value').textContent = `Rp ${items.reduce((n,x) => n + Number(x.stock || 0) * Number(x.price || 0), 0).toLocaleString('id-ID')}`; drawProducts(); } catch (e) { document.querySelector('#product-list').innerHTML = `<p class="empty">Gagal memuat produk: ${esc(e.message)}</p>`; } }
-function drawProducts() { const q = (document.querySelector('#product-search')?.value || '').toLowerCase(); const items = (window.__products || []).filter(x => `${x.name} ${x.sku} ${x.description}`.toLowerCase().includes(q)); document.querySelector('#product-list').innerHTML = items.length ? items.map(x => `<article class="product-card"><span class="product-image">◇</span><div class="product-main"><strong>${esc(x.name)}</strong><span>${esc(x.sku || 'Tanpa SKU')}</span><small>${esc(x.description || 'Tidak ada deskripsi')}</small></div><div class="product-price"><strong>Rp ${Number(x.price || 0).toLocaleString('id-ID')}</strong><span>${Number(x.stock || 0).toLocaleString('id-ID')} stok</span></div><button class="button secondary" data-domain-delete="products/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada produk</strong><span>Tambahkan produk pertama ke katalog.</span></p>'; }
+async function loadProducts() { try { const items = await api('products'); window.__products = items; document.querySelector('#product-count').textContent = items.length; document.querySelector('#product-stock').textContent = items.reduce((n,x) => n + Number(x.stock || 0), 0).toLocaleString('id-ID'); document.querySelector('#product-value').textContent = `Rp ${items.reduce((n,x) => n + Number(x.stock || 0) * (Number(x.price) || 0), 0).toLocaleString('id-ID')}`; drawProducts(); } catch (e) { document.querySelector('#product-list').innerHTML = `<p class="empty">Gagal memuat produk: ${esc(e.message)}</p>`; } }
+function drawProducts() { const q = (document.querySelector('#product-search')?.value || '').toLowerCase(); const items = (window.__products || []).filter(x => `${x.name} ${x.sku} ${x.description}`.toLowerCase().includes(q)); document.querySelector('#product-list').innerHTML = items.length ? items.map(x => `<article class="product-card"><span class="product-image">◇</span><div class="product-main"><strong>${esc(x.name)}</strong><span>${esc(x.sku || 'Tanpa SKU')}</span><small>${esc(x.description || 'Tidak ada deskripsi')}</small></div><div class="product-price"><strong>${esc(priceText(x.price))}</strong><span>${Number(x.stock || 0).toLocaleString('id-ID')} stok</span></div><button class="button secondary" data-domain-delete="products/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada produk</strong><span>Tambahkan produk pertama ke katalog.</span></p>'; }
 function focusProductForm() { document.querySelector('#product-create')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.querySelector('#product-create input[name="name"]')?.focus(); }
 const formsPage = () => domainPage('forms');
 function contactsPage() {
@@ -268,7 +276,7 @@ content.addEventListener('click', async event => {
   if (button.matches('[data-focus-product-form]')) { focusProductForm(); return; }
   if (button.matches('[data-focus-contact-form]')) { const form = document.querySelector('#contact-create'); form.hidden = false; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); form.querySelector('input[name="name"]')?.focus(); return; }
   if (button.matches('[data-order-filter]')) { document.querySelectorAll('[data-order-filter]').forEach(item => item.classList.toggle('active', item === button)); drawOrders(button.dataset.orderFilter); return; }
-  if (button.matches('[data-template-save]')) { const n=button.dataset.templateSave; const result=document.querySelector(`[data-template-result="${n}"]`); try { await api('templates', post({ name: document.querySelector(`[data-template-name="${n}"]`).value, body: document.querySelector(`[data-template-body="${n}"]`).value, stage: `FU${n}` })); notify(result, 'Template tersimpan di server.', 'ok'); } catch (e) { notify(result, e.message, 'error'); } return; }
+  if (button.matches('[data-template-save]')) { const n=button.dataset.templateSave; const result=document.querySelector(`[data-template-result="${n}"]`); button.disabled = true; try { await api('templates', post({ name: document.querySelector(`[data-template-name="${n}"]`).value, body: document.querySelector(`[data-template-body="${n}"]`).value, stage: `FU${n}` })); notify(result, 'Template tersimpan di server.', 'ok'); } catch (e) { notify(result, e.message, 'error'); } finally { button.disabled = false; } return; }
   try {
     if (button.matches('[data-save-settings]')) {
       const target = document.querySelector('#settings-result');
@@ -316,9 +324,11 @@ content.addEventListener('click', async event => {
     }
     if (button.matches('[data-send-message]')) {
       const target = document.querySelector('#send-result');
+      const phone = normalizePhone(document.querySelector('#phone').value);
+      if (!phone) { notify(target, INVALID_PHONE, 'error'); return; }
       button.disabled = true;
       try {
-        const sent = await api('send', post({ phone: document.querySelector('#phone').value, text: document.querySelector('#message').value }));
+        const sent = await api('send', post({ phone, text: document.querySelector('#message').value }));
         notify(target, `Pesan diserahkan ke WhatsApp (${sent.status}).`, 'ok');
       } finally { button.disabled = false; }
     }
@@ -406,6 +416,8 @@ content.addEventListener('submit', async event => {
   if (form.matches('#knowledge-form')) {
     event.preventDefault();
     const target = document.querySelector('#knowledge-result');
+    const submit = form.querySelector('[type=submit]');
+    submit.disabled = true;
     try {
       const file = document.querySelector('#knowledge-file').files[0];
       if (!file || file.type !== 'application/pdf') throw Error('Pilih file PDF yang valid.');
@@ -417,6 +429,7 @@ content.addEventListener('submit', async event => {
       await knowledgePanel();
       notify(document.querySelector('#knowledge-result'), 'PDF berhasil dibaca dan siap menjadi referensi AI.', 'ok');
     } catch (error) { notify(target, error.message, 'error'); }
+    finally { submit.disabled = false; }
     return;
   }
   if (form.matches('[data-domain-form]')) {
@@ -424,17 +437,29 @@ content.addEventListener('submit', async event => {
     const kind = form.dataset.domainForm;
     const payload = {};
     for (const [key, value] of new FormData(form)) payload[key] = value;
+    if (payload.phone) {
+      payload.phone = normalizePhone(payload.phone);
+      if (!payload.phone) { notify(document.querySelector('#domain-result'), INVALID_PHONE, 'error'); return; }
+    }
+    const submit = form.querySelector('[type=submit]');
+    submit.disabled = true;
     try {
       await api(kind, post(payload));
       form.reset();
-      if (kind === 'orders') await loadOrders(); else if (kind === 'products') await loadProducts(); else if (kind === 'contacts') await loadContacts(); else await loadDomain(kind);
+      await reloadKind(kind);
       notify(document.querySelector('#domain-result'), 'Data tersimpan di server.', 'ok');
     } catch (error) { notify(document.querySelector('#domain-result'), error.message, 'error'); }
+    finally { submit.disabled = false; }
   }
 });
 
-document.querySelectorAll('.nav a').forEach(link => link.addEventListener('click', () => setTimeout(render, 0)));
 addEventListener('hashchange', render);
+document.querySelector('#logout').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try { await api('logout', { method: 'POST' }); location.href = '/login'; }
+  catch (error) { button.disabled = false; alert(`Logout gagal: ${error.message}`); }
+});
 render();
 
 // Presentation only: navigation drawer and phone inbox panes share the existing routes.
