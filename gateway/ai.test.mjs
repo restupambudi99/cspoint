@@ -63,8 +63,9 @@ try {
   let sent = [], current = true;
   const simulatedNow = new Date('2026-11-04T10:00:00+07:00');
   const onError = error => { throw error; };
-  const connection = { isCurrent: () => current, send: async (jid, payload) => { sent.push({ jid, ...payload }); return { key: { id: `out-${sent.length}` } }; } };
-  const inbound = { id: 'in-1', jid: '628123450000@s.whatsapp.net', text: 'Berapa ongkir ke Kecamatan Bubon?', outgoing: false, timestamp: Date.now() };
+  const reads = [];
+  const connection = { isCurrent: () => current, markRead: async message => { reads.push(message.id); }, send: async (jid, payload) => { sent.push({ jid, ...payload }); return { key: { id: `out-${sent.length}` } }; } };
+  const inbound = { id: 'in-1', jid: '628123450000@s.whatsapp.net', text: 'Berapa ongkir ke Kecamatan Bubon?', outgoing: false, timestamp: simulatedNow.getTime() };
   assert.equal(messages.add(inbound), true);
   assert.equal(messages.add(inbound), false, 'duplicate WhatsApp delivery is recognized');
   const delays = [];
@@ -74,9 +75,11 @@ try {
   store.saveAgent({ enabled: true });
   await reply(inbound, connection);
   assert.equal(sent.length, 0, 'global auto-reply switch must also be on');
+  assert.equal(reads.length, 0, 'disabled AI must not mark messages as read');
   store.saveSettings({ autoReply: true, dailyLimit: 1 });
   await reply(inbound, connection);
   assert.equal(sent.length, 1);
+  assert.deepEqual(reads, [inbound.id], 'enabled AI acknowledges the incoming message before replying');
   assert.equal(delays.length, 0, 'first reply has no artificial interval delay');
   assert.match(lastPayload.messages[0].content, /Bubon \/ Aceh Barat → Rp40\.000/, 'shipping PDF tariff is included in the AI context');
   assert.equal(messages.thread(inbound.jid).at(-1).outgoing, 1);

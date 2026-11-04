@@ -11,6 +11,7 @@ import { mcpHandler } from './mcp.mjs';
 import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
 import { createAutoReply } from './auto-reply.mjs';
 import { extractKnowledgePdf } from './pdf-knowledge.mjs';
+import { readConversation } from './read-receipts.mjs';
 
 const token = process.env.GATEWAY_TOKEN;
 if (!token || token.length < 32) throw new Error('GATEWAY_TOKEN must contain at least 32 characters');
@@ -153,13 +154,22 @@ function connect() {
         const jid = message.key?.remoteJid;
         const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
         if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
-        const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
+        const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
         const fresh = messages.add(saved);
         if (fresh && type === 'notify' && !saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
-          void autoReply(saved, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload) });
+          void autoReply(saved, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, isCurrent() && status === 'connected' ? current : null, item.jid, [item.id]) });
         }
       }
     } catch { console.error('Unable to persist incoming messages'); }
+  });
+
+  current.ev.on('messages.update', updates => {
+    if (!isCurrent()) return;
+    for (const { key, update } of updates) messages.updateReceipt(key, update.status);
+  });
+  current.ev.on('message-receipt.update', updates => {
+    if (!isCurrent()) return;
+    for (const { key, receipt } of updates) messages.updateReceipt(key, receipt.readTimestamp || receipt.playedTimestamp ? 4 : receipt.receiptTimestamp ? 3 : 0);
   });
 
   current.ev.on('connection.update', update => {
@@ -316,15 +326,34 @@ const server = createServer(async (req, res) => {
 
     if (method === 'GET' && path === '/conversations') { send(res, 200, messages.list()); return; }    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
 
+    if (method === 'GET' && path === '/labels') { send(res, 200, messages.labels()); return; }
+    if (method === 'POST' && path === '/labels') { send(res, 200, messages.saveLabel(await readJson(req, 4000))); return; }
+    if (method === 'DELETE' && /^\/labels\/[a-zA-Z0-9-]{1,64}$/.test(path)) { send(res, 200, { removed: messages.deleteLabel(path.split('/')[2]) }); return; }
+    if (method === 'POST' && path === '/conversations/labels') {
+      const body = await readJson(req, 12000);
+      messages.setLabels(body.jid, body.labelIds);
+      send(res, 200, { saved: true }); return;
+    }
+    if (method === 'POST' && path === '/conversations/unread') {
+      const body = await readJson(req, 4000);
+      messages.markUnread(body.jid);
+      send(res, 200, { unread: true }); return;
+    }
+    if (method === 'POST' && path === '/conversations/read') {
+      const body = await readJson(req, 50000);
+      send(res, 200, await readConversation(messages, status === 'connected' ? socket : null, body.jid, body.ids)); return;
+    }
+
     if (method === 'POST' && path === '/send') {
       if (status !== 'connected' || !socket) { send(res, 409, { error: 'WhatsApp belum terhubung. Scan QR di Pengaturan.' }); return; }
       const body = await readJson(req, 200000);
       const phone = String(body.phone || '').replace(/\D/g, '').replace(/^0/, '62');
       const text = typeof body.text === 'string' ? body.text.trim() : '';
-      if (!/^\d{8,15}$/.test(phone) || !text || text.length > 4000) { send(res, 400, { error: 'Nomor atau pesan tidak valid' }); return; }
-      const jid = `${phone}@s.whatsapp.net`;
+      if ((body.jid === undefined && !/^\d{8,15}$/.test(phone)) || !text || text.length > 4000) { send(res, 400, { error: 'Nomor atau pesan tidak valid' }); return; }
+      const jid = body.jid === undefined ? `${phone}@s.whatsapp.net` : body.jid;
+      if (body.jid !== undefined && (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid))) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
       const result = await socket.sendMessage(jid, { text });
-      messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, timestamp: Date.now() });
+      messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now() });
       send(res, 200, { id: result.key.id, status: 'submitted' }); return;
     }
 

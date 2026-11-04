@@ -171,6 +171,44 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .inbox-list { display: grid; gap: 3px; }
 .conversation-row { display: grid; grid-template-columns: 38px minmax(0,1fr) auto; gap: 10px; align-items: center; width: 100%; border: 0; border-radius: 10px; background: transparent; color: var(--ink); cursor: pointer; padding: 11px 8px; text-align: left; }
 .conversation-row:hover, .conversation-row.selected { background: var(--accent-soft); }
+.conversation-row.unread { border-left: 3px solid #0369a1; background: #eef8ff; }
+.conversation-row.read { border-left: 3px solid transparent; }
+.conversation-meta { display: grid; justify-items: end; gap: 7px; }
+.read-state { font-size: 11px; color: #475569; white-space: nowrap; }
+.unread .read-state { background: #0369a1; color: #fff; border-radius: 12px; padding: 3px 7px; font-weight: 600; }
+.label-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.label-chip { display: inline-block; border-radius: 5px; padding: 3px 6px; font-size: 11px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.label-blue { color: #075985; background: #e0f2fe; }
+.label-green { color: #166534; background: #dcfce7; }
+.label-amber { color: #854d0e; background: #fef3c7; }
+.label-purple { color: #6b21a8; background: #f3e8ff; }
+.label-rose { color: #9f1239; background: #ffe4e6; }
+.label-slate { color: #334155; background: #e2e8f0; }
+.inbox-label-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.inbox-label-filter select { flex: 1; min-width: 120px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: white; color: var(--ink); }
+.inbox-label-filter .button, .chat-actions .button { font-size: 12px; padding: 8px 10px; min-height: 36px; }
+.chat-identity { min-width: 0; }
+.chat-identity h2 { overflow-wrap: anywhere; }
+.chat-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 6px; }
+.chat-actions[hidden] { display: none; }
+.message-receipt { display: inline-block; margin-left: 4px; font-size: 14px; font-weight: 700; color: #64748b; letter-spacing: -3px; padding-right: 3px; }
+.message-receipt.read { color: #0077b6; }
+.inbox-label-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; margin: auto; border: 1px solid var(--line); border-radius: 16px; padding: 22px; color: var(--ink); background: white; }
+.inbox-label-dialog::backdrop { background: rgb(15 23 42 / 40%); }
+.label-dialog-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.label-dialog-header h2 { font-size: 20px; }
+#label-dialog-help, #label-feedback { font-size: 13px; line-height: 1.6; margin: 12px 0; }
+.label-option { display: flex; align-items: center; gap: 6px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.label-option label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.label-option input { width: 18px; height: 18px; accent-color: #0369a1; }
+.label-edit, .label-delete { background: white; border: 1px solid var(--line); border-radius: 6px; padding: 8px; color: #075985; cursor: pointer; }
+.label-delete { color: #9f1239; }
+#label-form { display: grid; gap: 12px; margin-top: 18px; }
+#label-form label { display: grid; gap: 6px; font-size: 13px; }
+#label-form input, #label-form select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: white; color: var(--ink); }
+.label-form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.inbox-shell :focus-visible, .inbox-label-dialog :focus-visible { outline: 2px solid #0369a1; outline-offset: 3px; }
+@media (max-width: 600px) { .chat-header { flex-wrap: wrap; } .chat-actions { width: 100%; } .inbox-label-dialog { padding: 16px; } }
 .conversation-avatar, .chat-avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; flex: none; }
 .conversation-copy { display: grid; min-width: 0; gap: 4px; }
 .conversation-copy strong, .conversation-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

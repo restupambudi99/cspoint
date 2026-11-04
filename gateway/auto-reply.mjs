@@ -16,6 +16,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
       if (!connection.isCurrent() || !allowed()) return;
       const settings = store.settings(), agent = store.agent('default'), provider = config.publicConfig();
       if (!config.claimReply(message.id, dayInJakarta(now()), settings.dailyLimit)) return;
+      await connection.markRead?.(message);
       const knowledge = store.knowledge.relevant(message.text);
       const prompt = buildMessages(agent, messages.thread(message.jid), store.products.list(), knowledge);
       let text;
@@ -39,7 +40,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
       if (!connection.isCurrent() || !allowed() || store.agent('default').updatedAt !== agent.updatedAt || config.publicConfig().updatedAt !== provider.updatedAt) return;
       const result = await connection.send(message.jid, { text });
       lastSentAt = now().getTime();
-      messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, timestamp: now().getTime() });
+      messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime() });
       onSuccess();
     }).catch(error => onError(error)).finally(() => { pending--; });
     chain = job;
