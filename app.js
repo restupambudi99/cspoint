@@ -128,7 +128,7 @@ async function drawAgent() {
       </section>
       <div class="form-grid">
         <label class="field">Nama asisten<input id="agent-name" value="${esc(agent.assistantName)}" maxlength="60"></label>
-        <label class="field full">Instruksi<textarea id="agent-instructions" rows="6" maxlength="8000">${esc(agent.instructions)}</textarea></label>
+        <label class="field full">Instruksi<textarea id="agent-instructions" rows="6">${esc(agent.instructions)}</textarea><span class="hint">Instruksi disimpan utuh tanpa pemotongan karakter.</span></label>
         <label class="check"><input id="agent-enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Aktifkan AI Agent</label>
       </div>
       <div class="section-actions"><button class="button" data-save-agent>Simpan Agent</button><p role="status" id="agent-result" class="hint"></p></div>

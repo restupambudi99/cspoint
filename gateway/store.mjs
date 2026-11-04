@@ -154,7 +154,8 @@ export function openStore(path) {
     saveAgent(input = {}) {
       const instance = text(input.instance, 60) || 'default';
       const assistantName = text(input.assistantName, 60) || 'Kak';
-      const instructions = text(input.instructions, 8000);
+      const instructions = String(input.instructions ?? '').trim();
+      if (instructions.includes('\0')) throw Object.assign(new Error('Instruksi mengandung karakter yang tidak valid'), { status: 400 });
       const enabled = input.enabled ? 1 : 0;
       db.prepare('INSERT INTO agents (instance, assistant_name, instructions, enabled, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(instance) DO UPDATE SET assistant_name=excluded.assistant_name, instructions=excluded.instructions, enabled=excluded.enabled, updated_at=excluded.updated_at').run(instance, assistantName, instructions, enabled, now());
       return this.agent(instance);
