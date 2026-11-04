@@ -10,6 +10,7 @@ import { openStore } from './store.mjs';
 import { mcpHandler } from './mcp.mjs';
 import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
 import { createAutoReply } from './auto-reply.mjs';
+import { extractKnowledgePdf } from './pdf-knowledge.mjs';
 
 const token = process.env.GATEWAY_TOKEN;
 if (!token || token.length < 32) throw new Error('GATEWAY_TOKEN must contain at least 32 characters');
@@ -17,7 +18,17 @@ const logger = pino({ level: 'silent' });
 const dbPath = process.env.MESSAGE_DB || ':memory:';
 const messages = openMessages(dbPath);
 const store = openStore(dbPath);
+for (;;) {
+  const legacyPdfs = store.knowledge.pendingPdfExtraction();
+  if (!legacyPdfs.length) break;
+  for (const legacy of legacyPdfs) {
+    try { store.knowledge.saveExtractedPdf(legacy.id, await extractKnowledgePdf(legacy.content)); }
+    catch { store.knowledge.markPdfNeedsUpload(legacy.id); }
+  }
+}
 const aiConfig = openAiConfig(dbPath, token);
+const currentAgent = store.agent('default');
+if (store.settings().autoReply && (!currentAgent.enabled || !currentAgent.instructions.trim() || !aiConfig.publicConfig().hasApiKey)) store.saveSettings({ autoReply: false });
 const aiRouter = createRouterClient(aiConfig);
 const autoReply = createAutoReply({ store, config: aiConfig, router: aiRouter, messages, buildMessages: buildAiMessages,
   onError: () => console.error('AI auto-reply failed; no automatic retry will be sent'),
@@ -306,7 +317,14 @@ const server = createServer(async (req, res) => {
     }
 
     if (method === 'GET' && path === '/settings') { send(res, 200, store.settings()); return; }
-    if (method === 'POST' && path === '/settings') { send(res, 200, store.saveSettings(await readJson(req, 12000000))); return; }
+    if (method === 'POST' && path === '/settings') {
+      const patch = await readJson(req, 12000000);
+      const agent = store.agent('default');
+      if (patch.autoReply === true && (!agent.enabled || !agent.instructions.trim() || !aiConfig.publicConfig().hasApiKey)) {
+        send(res, 409, { error: 'Simpan instruksi AI Agent dan koneksi API key 9Router sebelum mengaktifkan balasan AI.' }); return;
+      }
+      send(res, 200, store.saveSettings(patch)); return;
+    }
 
     if (method === 'GET' && path === '/agent') { send(res, 200, store.agent(url.searchParams.get('instance') || 'default')); return; }
     if (method === 'POST' && path === '/agent') { send(res, 200, store.saveAgent(await readJson(req, 10000000))); return; }
@@ -318,7 +336,7 @@ const server = createServer(async (req, res) => {
       const input = await readJson(req, 12000);
       const prompt = input.prompt === undefined ? 'Jawab singkat: koneksi CSPoint berhasil.' : input.prompt;
       if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) { send(res, 400, { error: 'Pesan uji wajib diisi, maksimal 4.000 karakter.' }); return; }
-      const text = await aiRouter.complete(buildAiMessages(store.agent('default'), [{ text: prompt, outgoing: false }], store.products.list()));
+      const text = await aiRouter.complete(buildAiMessages(store.agent('default'), [{ text: prompt, outgoing: false }], store.products.list(), store.knowledge.relevant(prompt)));
       send(res, 200, { reply: text, model: aiConfig.publicConfig().model }); return;
     }
 
@@ -326,7 +344,14 @@ const server = createServer(async (req, res) => {
       const listPath = `/${name}`;
       const itemPattern = new RegExp(`^/${name}/([A-Za-z0-9-]{1,64})$`);
       if (method === 'GET' && path === listPath) { send(res, 200, store[name].list()); return; }
-      if (method === 'POST' && path === listPath) { send(res, 200, store[name].create(await readJson(req, name === 'knowledge' ? 12000000 : 1000000))); return; }
+      if (method === 'POST' && path === listPath) {
+        const input = await readJson(req, name === 'knowledge' ? 12000000 : 1000000);
+        if (name === 'knowledge' && input.mime === 'application/pdf') {
+          input.sourceContent = input.content;
+          input.content = await extractKnowledgePdf(input.content);
+        }
+        send(res, 200, store[name].create(input)); return;
+      }
       const item = path.match(itemPattern);
       if (method === 'DELETE' && item) {
         const removed = store[name].remove(item[1]);

@@ -16,6 +16,7 @@ async function api(path, options = {}) {
 }
 const post = body => ({ method: 'POST', body: JSON.stringify(body) });
 const MAX_KNOWLEDGE_PDF_CHARS = 500000;
+const MAX_KNOWLEDGE_PDF_BYTES = 8 * 1024 * 1024;
 const MAX_SHIPPING_PDF_BYTES = 1000000;
 
 function notify(element, message, kind = 'info') {
@@ -132,7 +133,7 @@ async function drawAgent() {
         <label class="check"><input id="agent-enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Aktifkan AI Agent</label>
       </div>
       <div class="section-actions"><button class="button" data-save-agent>Simpan Agent</button><p role="status" id="agent-result" class="hint"></p></div>
-      <p class="hint">Balasan WhatsApp otomatis memerlukan koneksi 9Router, toggle Aktifkan AI Agent di atas, dan Aktifkan balasan otomatis di Pengaturan. Knowledge PDF belum dibaca otomatis oleh AI.</p>`;
+      <p class="hint">Balasan WhatsApp otomatis memerlukan koneksi 9Router, AI Agent aktif, dan mode AI aktif di Kotak Masuk. Knowledge PDF yang relevan disertakan saat AI menjawab.</p>`;
   } catch (error) {
     panel.innerHTML = `<p class="empty">Gagal memuat agent: ${esc(error.message)}</p>`;
   }
@@ -145,7 +146,7 @@ async function knowledgePanel() {
     const items = await api('knowledge');
     panel.innerHTML = `
       <form id="knowledge-form" class="form-grid">
-        <label class="field full">Upload dokumen PDF<input id="knowledge-file" type="file" accept="application/pdf,.pdf" required><span class="hint">PDF disimpan sebagai sumber pengetahuan untuk konfigurasi AI Agent. Maksimal ${MAX_KNOWLEDGE_PDF_CHARS.toLocaleString('id-ID')} karakter data.</span></label>
+        <label class="field full">Upload dokumen PDF<input id="knowledge-file" type="file" accept="application/pdf,.pdf" required><span class="hint">PDF dibaca menjadi sumber pengetahuan AI. Ukuran berkas maksimal 8 MB dan teks hasil ekstraksi maksimal ${MAX_KNOWLEDGE_PDF_CHARS.toLocaleString('id-ID')} karakter.</span></label>
         <label class="field">Nama dokumen<input id="knowledge-name" maxlength="160" placeholder="Otomatis dari nama file"></label>
         <div class="knowledge-dropzone" id="knowledge-dropzone"><strong>Knowledge PDF</strong><span>Pilih file PDF untuk mengajari AI tentang produk, layanan, atau SOP Anda.</span></div>
         <div class="section-actions"><button class="button" type="submit">Upload & Simpan</button><p role="status" id="knowledge-result" class="hint"></p></div>
@@ -403,13 +404,13 @@ content.addEventListener('submit', async event => {
     try {
       const file = document.querySelector('#knowledge-file').files[0];
       if (!file || file.type !== 'application/pdf') throw Error('Pilih file PDF yang valid.');
-      if (file.size > 8 * 1024 * 1024) throw Error('Ukuran file PDF maksimal 8 MB.');
+      if (file.size > MAX_KNOWLEDGE_PDF_BYTES) throw Error('Ukuran file PDF maksimal 8 MB.');
       const bytes = new Uint8Array(await file.arrayBuffer());
       let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-      const content = btoa(binary); if (content.length > MAX_KNOWLEDGE_PDF_CHARS) throw Error(`Data PDF melebihi ${MAX_KNOWLEDGE_PDF_CHARS.toLocaleString('id-ID')} karakter.`);
+      const content = btoa(binary);
       await api('knowledge', post({ name: document.querySelector('#knowledge-name').value.trim() || file.name, content, mime: 'application/pdf', originalSize: file.size }));
       await knowledgePanel();
-      notify(document.querySelector('#knowledge-result'), 'Knowledge tersimpan.', 'ok');
+      notify(document.querySelector('#knowledge-result'), 'PDF berhasil dibaca dan siap menjadi referensi AI.', 'ok');
     } catch (error) { notify(target, error.message, 'error'); }
     return;
   }

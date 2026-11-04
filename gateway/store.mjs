@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { rankKnowledge } from './pdf-knowledge.mjs';
 
 const now = () => Date.now();
 const id = () => randomUUID();
@@ -17,6 +18,8 @@ export function openStore(path) {
     CREATE TABLE IF NOT EXISTS contacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', tag TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', stage TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
   `);
+  const knowledgeColumns = new Set(db.prepare('PRAGMA table_info(knowledge)').all().map(column => column.name));
+  if (!knowledgeColumns.has('source_content')) db.exec("ALTER TABLE knowledge ADD COLUMN source_content TEXT NOT NULL DEFAULT ''");
   const phone = value => String(value ?? '').replace(/\D/g, '').replace(/^0/, '62').slice(0, 15);
 
   const text = (value, max) => String(value ?? '').trim().slice(0, max);
@@ -111,13 +114,25 @@ export function openStore(path) {
 
     knowledge: {
       list: () => db.prepare('SELECT id, name, mime, status, created_at, length(content) AS size FROM knowledge ORDER BY created_at DESC LIMIT 200').all(),
+      relevant(query) {
+        const documents = db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all();
+        return rankKnowledge(query, documents);
+      },
+      pendingPdfExtraction: () => db.prepare("SELECT id, name, content FROM knowledge WHERE mime='application/pdf' AND status='PDF tersimpan' AND source_content='' ORDER BY created_at ASC LIMIT 25").all(),
+      saveExtractedPdf(knowledgeId, content) {
+        db.prepare("UPDATE knowledge SET source_content=content, content=?, status='Siap dipakai AI' WHERE id=? AND mime='application/pdf'").run(content, String(knowledgeId));
+      },
+      markPdfNeedsUpload(knowledgeId) {
+        db.prepare("UPDATE knowledge SET status='Perlu unggah ulang' WHERE id=? AND mime='application/pdf'").run(String(knowledgeId));
+      },
       create(input = {}) {
         const name = text(input.name, 160);
         const content = String(input.content ?? '').trim();
         if (!name || !content) throw Object.assign(new Error('Nama dan isi knowledge wajib diisi'), { status: 400 });
         if (content.length > 500000) throw Object.assign(new Error('Isi knowledge PDF melebihi batas 500.000 karakter'), { status: 413 });
-        const row = { id: id(), name, content, mime: text(input.mime, 80) || 'text/plain', status: input.mime === 'application/pdf' ? 'PDF tersimpan' : 'siap', created_at: now() };
-        db.prepare('INSERT INTO knowledge VALUES (?,?,?,?,?,?)').run(row.id, row.name, row.content, row.mime, row.status, row.created_at);
+        const mime = text(input.mime, 80) || 'text/plain';
+        const row = { id: id(), name, content, mime, status: mime === 'application/pdf' ? 'Siap dipakai AI' : 'siap', created_at: now(), sourceContent: String(input.sourceContent ?? '') };
+        db.prepare('INSERT INTO knowledge (id,name,content,mime,status,created_at,source_content) VALUES (?,?,?,?,?,?,?)').run(row.id, row.name, row.content, row.mime, row.status, row.created_at, row.sourceContent);
         return { id: row.id, name: row.name, mime: row.mime, status: row.status, created_at: row.created_at, size: content.length };
       },
       remove(knowledgeId) { return db.prepare('DELETE FROM knowledge WHERE id=?').run(String(knowledgeId)).changes > 0; },
@@ -158,6 +173,7 @@ export function openStore(path) {
       if (instructions.includes('\0')) throw Object.assign(new Error('Instruksi mengandung karakter yang tidak valid'), { status: 400 });
       const enabled = input.enabled ? 1 : 0;
       db.prepare('INSERT INTO agents (instance, assistant_name, instructions, enabled, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(instance) DO UPDATE SET assistant_name=excluded.assistant_name, instructions=excluded.instructions, enabled=excluded.enabled, updated_at=excluded.updated_at').run(instance, assistantName, instructions, enabled, now());
+      if ((!enabled || !instructions) && this.settings().autoReply) this.saveSettings({ autoReply: false });
       return this.agent(instance);
     },
 

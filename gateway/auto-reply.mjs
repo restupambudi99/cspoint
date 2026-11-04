@@ -16,7 +16,8 @@ export function createAutoReply({ store, config, router, messages, buildMessages
       if (!connection.isCurrent() || !allowed()) return;
       const settings = store.settings(), agent = store.agent('default'), provider = config.publicConfig();
       if (!config.claimReply(message.id, dayInJakarta(now()), settings.dailyLimit)) return;
-      const text = await router.complete(buildMessages(agent, messages.thread(message.jid), store.products.list()));
+      const knowledge = store.knowledge.relevant(message.text);
+      const text = await router.complete(buildMessages(agent, messages.thread(message.jid), store.products.list(), knowledge));
       const seconds = settings.minInterval + Math.random() * (settings.maxInterval - settings.minInterval);
       await sleep(seconds * 1000);
       // A setting change or reconnect while inference ran must cancel the stale send.
