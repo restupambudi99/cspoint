@@ -245,7 +245,7 @@ async function disconnectPrimary() {
   return statusPayload();
 }
 
-const instanceManager = createInstanceManager({ store, messages, config: aiConfig, router: aiRouter, buildMessages: buildAiMessages, primaryStatus: statusPayload, primaryConnect: connectPrimary, primaryDisconnect });
+const instanceManager = createInstanceManager({ store, messages, config: aiConfig, router: aiRouter, buildMessages: buildAiMessages, primaryStatus: statusPayload, primaryConnect: connectPrimary, primaryDisconnect: disconnectPrimary });
 
 async function readJson(req, limit = 1_000_000) {
   let raw = '';
