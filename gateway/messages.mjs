@@ -44,6 +44,11 @@ export function openMessages(path) {
         const existing = db.prepare('SELECT entries FROM conversation_memory WHERE jid=?').get(message.jid);
         let entries = [];
         try { entries = JSON.parse(existing?.entries || '[]'); } catch {}
+        if (!Array.isArray(entries) || !entries.length) {
+          entries = db.prepare("SELECT id,text,outgoing,timestamp FROM messages WHERE jid=? AND id<>? AND trim(text)<>'' ORDER BY timestamp DESC,rowid DESC LIMIT 11")
+            .all(message.jid, message.id).reverse()
+            .map(entry => ({ ...entry, text: entry.text.slice(-240), outgoing: Boolean(entry.outgoing) }));
+        }
         entries = Array.isArray(entries) ? entries.filter(entry => typeof entry?.text === 'string').slice(-11) : [];
         entries.push({ id: message.id, text: message.text.trim().slice(-240), outgoing: Boolean(message.outgoing), timestamp: message.timestamp });
         db.prepare('INSERT INTO conversation_memory (jid,entries,updated_at) VALUES (?,?,?) ON CONFLICT(jid) DO UPDATE SET entries=excluded.entries,updated_at=excluded.updated_at')
