@@ -34,20 +34,19 @@ function section(heading, intro, body, action = '') {
 function settingsPage() {
   content.innerHTML = [
     section('Nomor WhatsApp (Instance)', 'Satu nomor WhatsApp per gateway. Status di bawah dibaca langsung dari server.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat status koneksi…</p></div>'),
-    section('Pengaturan Interval', 'Jeda antar pesan otomatis. Disimpan di database server.', `
+    section('Pengaturan Interval', 'Jeda antar balasan AI otomatis. Disimpan di database server.', `
       <div class="form-grid">
         <label class="field">Minimum (detik)<input id="set-min" type="number" min="1" max="600" value="2"></label>
         <label class="field">Maksimum (detik)<input id="set-max" type="number" min="1" max="600" value="5"></label>
-        <label class="field">Rotasi<select id="set-rotation"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select></label>
+        <label class="field">Rotasi<select id="set-rotation" disabled title="Belum tersedia"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select><span class="hint">Belum tersedia.</span></label>
       </div>
       <div class="section-actions"><button class="button" data-save-settings>Simpan Pengaturan</button><p role="status" id="settings-result" class="hint"></p></div>`),
-    section('Waktu Operasional', 'Pesan otomatis hanya dikirim pada waktu yang Anda tentukan.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan batas waktu</strong><span>Batasi pengiriman pesan di luar jam kerja.</span></div><label class="switch"><input id="set-schedule-enabled" type="checkbox"><span class="track"></span></label></div><div class="form-grid schedule-fields"><label class="field">Mulai<input id="set-schedule-start" type="time" value="08:00"></label><label class="field">Selesai<input id="set-schedule-end" type="time" value="21:00"></label></div>`),
-    section('Ekspedisi Cek Ongkir', 'Ekspedisi yang dipakai saat menghitung ongkir.', `
-      <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}">${esc(name)}</label>`).join('')}</div>
-      <div class="section-actions"><button class="button" data-save-shipping>Simpan Ekspedisi</button><p role="status" id="shipping-result" class="hint"></p></div>`),
-    section('Ongkir Manual dari PDF', 'Unggah daftar tarif per kecamatan untuk dipakai sebagai sumber perhitungan.', `<div class="manual-shipping-card"><div class="switch-row manual-priority"><div class="switch-copy"><strong>Prioritaskan tarif manual</strong><span>Jika kecamatan pembeli ada di daftar, AI memakai tarif ini. Jika tidak ada, tetap cek RajaOngkir.</span></div><label class="switch"><input id="set-manual-shipping-priority" type="checkbox"><span class="track"></span></label></div><label class="field full">File tarif ongkir PDF<input id="shipping-pdf" type="file" accept="application/pdf,.pdf"><span class="hint">Format: Kecamatan / Kabupaten → tarif. Maksimal ${MAX_SHIPPING_PDF_BYTES.toLocaleString('id-ID')} byte (sekitar 1 MB).</span></label><p id="shipping-pdf-current" class="shipping-pdf-current">Belum ada PDF ongkir tersimpan.</p><div class="section-actions"><button class="button" data-save-shipping-pdf>Simpan PDF Ongkir</button><p role="status" id="shipping-pdf-result" class="hint"></p></div></div>`),
+    section('Waktu Operasional', 'Pesan otomatis hanya dikirim pada waktu yang Anda tentukan.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan batas waktu</strong><span>Batasi pengiriman pesan di luar jam kerja.</span></div><label class="switch"><input id="set-schedule-enabled" type="checkbox"><span class="track"></span></label></div><div class="form-grid schedule-fields"><label class="field">Mulai<input id="set-schedule-start" type="time" value="08:00"></label><label class="field">Selesai<input id="set-schedule-end" type="time" value="21:00"></label></div><div class="section-actions"><button class="button" data-save-schedule>Simpan Waktu Operasional</button><p role="status" id="schedule-result" class="hint"></p></div>`),
+    section('Ekspedisi Cek Ongkir', 'Belum tersedia. Integrasi cek ongkir ekspedisi belum ada; AI memakai tarif dari PDF di bawah.', `
+      <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}" disabled title="Belum tersedia">${esc(name)}</label>`).join('')}</div>`),
+    section('Ongkir Manual dari PDF', 'Unggah daftar tarif per kecamatan untuk dipakai sebagai sumber perhitungan.', `<div class="manual-shipping-card"><div class="switch-row manual-priority"><div class="switch-copy"><strong>Prioritaskan tarif manual</strong><span>Jika kecamatan pembeli ada di daftar, AI memakai tarif ini. Jika tidak ada, AI menyampaikan bahwa tarif akan dikonfirmasi admin.</span></div><label class="switch"><input id="set-manual-shipping-priority" type="checkbox"><span class="track"></span></label></div><label class="field full">File tarif ongkir PDF<input id="shipping-pdf" type="file" accept="application/pdf,.pdf"><span class="hint">Format: Kecamatan / Kabupaten → tarif. Maksimal ${MAX_SHIPPING_PDF_BYTES.toLocaleString('id-ID')} byte (sekitar 1 MB).</span></label><p id="shipping-pdf-current" class="shipping-pdf-current">Belum ada PDF ongkir tersimpan.</p><div class="section-actions"><button class="button" data-save-shipping-pdf>Simpan PDF Ongkir</button><p role="status" id="shipping-pdf-result" class="hint"></p></div></div>`),
     section('Pesan Masuk', 'Atur perilaku saat pesan pelanggan masuk.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan balasan otomatis</strong><span>AI Agent akan merespons pesan ketika konfigurasi sudah aktif.</span></div><label class="switch"><input id="set-auto-reply" type="checkbox"><span class="track"></span></label></div><div class="switch-row"><div class="switch-copy"><strong>Simpan riwayat pesan</strong><span>Pesan disimpan untuk Kotak Masuk dan analitik.</span></div><label class="switch"><input id="set-save-history" type="checkbox" checked><span class="track"></span></label></div><div class="section-actions"><button class="button" data-save-inbox>Simpan Pengaturan</button><p role="status" id="inbox-result" class="hint"></p></div>`),
-    section('Pengaturan Pengiriman', 'Atur batas dan perilaku pengiriman pesan massal.', `<div class="form-grid"><label class="field">Batas pesan per hari<input id="set-daily-limit" type="number" min="0" value="100"></label><label class="field">Mode pengiriman<select id="set-send-mode"><option>Aman (bertahap)</option><option>Normal</option></select></label></div><p class="hint">Gunakan interval acak dan batas harian untuk menjaga kualitas pengiriman WhatsApp.</p>`),
+    section('Pengaturan Pengiriman', 'Batas balasan AI otomatis per hari.', `<div class="form-grid"><label class="field">Batas pesan per hari<input id="set-daily-limit" type="number" min="0" step="1" value="0"><span class="hint">0 berarti tanpa batas.</span></label><label class="field">Mode pengiriman<select id="set-send-mode" disabled title="Belum tersedia"><option>Aman (bertahap)</option><option>Normal</option></select><span class="hint">Belum tersedia.</span></label></div><div class="section-actions"><button class="button" data-save-delivery>Simpan Pengiriman</button><p role="status" id="delivery-result" class="hint"></p></div>`),
   ].join('');
   loadSettings();
 }
@@ -64,7 +63,7 @@ async function loadSettings() {
     document.querySelector('#set-schedule-end').value = settings.scheduleEnd || '21:00';
     document.querySelector('#set-auto-reply').checked = Boolean(settings.autoReply);
     document.querySelector('#set-save-history').checked = settings.saveHistory !== false;
-    document.querySelector('#set-daily-limit').value = settings.dailyLimit ?? 100;
+    document.querySelector('#set-daily-limit').value = settings.dailyLimit ?? 0;
     document.querySelector('#set-send-mode').value = settings.sendMode || 'Aman (bertahap)';
     document.querySelector('#set-manual-shipping-priority').checked = settings.manualShippingPriority !== false;
     for (const box of document.querySelectorAll('input[name=courier]')) box.checked = (settings.couriers || []).includes(box.value);
@@ -274,30 +273,35 @@ content.addEventListener('click', async event => {
   try {
     if (button.matches('[data-save-settings]')) {
       const target = document.querySelector('#settings-result');
+      const minInput = document.querySelector('#set-min'), maxInput = document.querySelector('#set-max');
+      const minInterval = Number(minInput.value), maxInterval = Number(maxInput.value);
+      if (!Number.isInteger(minInterval) || !Number.isInteger(maxInterval) || minInterval < 1 || maxInterval > 600 || minInterval > maxInterval) { notify(target, 'Interval harus bilangan bulat 1–600 detik, dan minimum tidak boleh melebihi maksimum.', 'error'); return; }
       button.disabled = true;
       try {
-        const saved = await api('settings', post({
-          minInterval: Number(document.querySelector('#set-min').value),
-          maxInterval: Number(document.querySelector('#set-max').value),
-          rotation: document.querySelector('#set-rotation').value,
-          scheduleEnabled: document.querySelector('#set-schedule-enabled').checked,
-          scheduleStart: document.querySelector('#set-schedule-start').value,
-          scheduleEnd: document.querySelector('#set-schedule-end').value,
-          dailyLimit: Number(document.querySelector('#set-daily-limit').value),
-          sendMode: document.querySelector('#set-send-mode').value,
-          autoReply: document.querySelector('#set-auto-reply').checked,
-          saveHistory: document.querySelector('#set-save-history').checked,
-          manualShippingPriority: document.querySelector('#set-manual-shipping-priority').checked,
-        }));
-        notify(target, `Tersimpan: interval ${saved.minInterval}–${saved.maxInterval} detik, ${saved.rotation}.`, 'ok');
+        // Only the interval: this button must never change the AI or history toggles.
+        const saved = await api('settings', post({ minInterval, maxInterval }));
+        minInput.value = saved.minInterval; maxInput.value = saved.maxInterval;
+        notify(target, `Tersimpan: interval ${saved.minInterval}–${saved.maxInterval} detik.`, 'ok');
       } finally { button.disabled = false; }
     }
-    if (button.matches('[data-save-shipping]')) {
-      const target = document.querySelector('#shipping-result');
+    if (button.matches('[data-save-schedule]')) {
+      const target = document.querySelector('#schedule-result');
+      const scheduleStart = document.querySelector('#set-schedule-start').value, scheduleEnd = document.querySelector('#set-schedule-end').value;
+      if (!scheduleStart || !scheduleEnd || scheduleStart >= scheduleEnd) { notify(target, 'Jam mulai harus lebih awal dari jam selesai.', 'error'); return; }
       button.disabled = true;
       try {
-        const saved = await api('settings', post({ couriers: [...document.querySelectorAll('input[name=courier]:checked')].map(box => box.value) }));
-        notify(target, `Tersimpan: ${saved.couriers.length} ekspedisi.`, 'ok');
+        await api('settings', post({ scheduleEnabled: document.querySelector('#set-schedule-enabled').checked, scheduleStart, scheduleEnd }));
+        notify(target, 'Waktu operasional tersimpan.', 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-save-delivery]')) {
+      const target = document.querySelector('#delivery-result');
+      const dailyLimit = Number(document.querySelector('#set-daily-limit').value);
+      if (!Number.isInteger(dailyLimit) || dailyLimit < 0) { notify(target, 'Batas harian harus bilangan bulat 0 atau lebih.', 'error'); return; }
+      button.disabled = true;
+      try {
+        const saved = await api('settings', post({ dailyLimit }));
+        notify(target, saved.dailyLimit ? `Tersimpan: ${saved.dailyLimit} pesan per hari.` : 'Tersimpan: tanpa batas harian.', 'ok');
       } finally { button.disabled = false; }
     }
     if (button.matches('[data-save-shipping-pdf]')) {
