@@ -1,0 +1,17 @@
+node_modules/
+session/
+test-session/
+session-backups/
+backups/
+ui-backups/
+*.sqlite
+*.sqlite-*
+*.db
+*.env
+.env
+.env.*
+*.pem
+*.key
+*.tar.gz
+credentials*.json
+cloudflared-chatbot.yml
