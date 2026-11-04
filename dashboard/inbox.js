@@ -69,10 +69,13 @@
       const items = conversations.filter(item => (filter !== 'unread' || item.unreadCount > 0) && (!labelFilter || (item.labels || []).some(label => label.id === labelFilter)) && `${item.name} ${item.jid} ${item.text}`.toLocaleLowerCase('id-ID').includes(query));
       panel.querySelector('#inbox-count').textContent = `${conversations.length} percakapan`;
       panel.querySelector('#unread-total').textContent = conversations.filter(item => item.unreadCount > 0).length;
+      const focusedJid = document.activeElement?.closest?.('#inbox-list [data-jid]')?.dataset.jid;
       list.innerHTML = items.length ? items.map(item => {
         const name = item.name || item.jid.split('@')[0];
         return `<button class="conversation-row ${item.unreadCount ? 'unread' : 'read'} ${selected === item.jid ? 'selected' : ''}" aria-pressed="${selected === item.jid}" type="button" data-jid="${esc(item.jid)}"><span class="conversation-avatar">${esc(name.slice(0, 1).toUpperCase())}</span><span class="conversation-copy"><strong>${esc(name)}</strong><small>${esc(item.text || 'Belum ada pesan')}</small><span class="label-chips">${(item.labels || []).map(chip).join('')}</span></span><span class="conversation-meta"><time>${item.timestamp ? esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })) : ''}</time><span class="read-state">${item.unreadCount ? `${item.unreadCount} baru` : 'Dibaca'}</span></span></button>`;
       }).join('') : `<div class="inbox-empty"><strong>${filter === 'unread' ? 'Tidak ada chat belum dibaca' : 'Percakapan tidak ditemukan'}</strong><span>${query || labelFilter ? 'Coba ubah pencarian atau filter label.' : 'Pesan baru akan tampil di sini.'}</span></div>`;
+      // The 5-second refresh rebuilds the list; keep keyboard users on their row.
+      if (focusedJid) [...list.querySelectorAll('[data-jid]')].find(row => row.dataset.jid === focusedJid)?.focus();
       renderSelectedLabels();
     };
 
@@ -192,6 +195,11 @@
     panel.querySelector('[data-manage-labels]').addEventListener('click', () => openLabels(''));
     panel.querySelector('[data-chat-labels]').addEventListener('click', () => openLabels(selected));
     dialog.querySelector('[data-close-labels]').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('click', event => {
+      if (event.target !== dialog) return;
+      const box = dialog.getBoundingClientRect();
+      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close();
+    });
     labelForm.addEventListener('reset', () => { labelForm.elements.id.value = ''; });
     labelForm.addEventListener('submit', async event => {
       event.preventDefault();
