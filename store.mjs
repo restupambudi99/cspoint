@@ -119,7 +119,7 @@ export function openStore(path) {
     knowledge: {
       list: () => db.prepare('SELECT id, name, mime, status, created_at, length(content) AS size FROM knowledge ORDER BY created_at DESC LIMIT 200').all(),
       relevant(query) {
-        const shipping = db.prepare("SELECT (SELECT value FROM settings WHERE key='shippingPdfName') AS name, value AS content FROM settings WHERE key='shippingPdfText'").get();
+        const shipping = db.prepare("SELECT (SELECT value FROM settings WHERE key='shippingPdfName') AS name, value AS content FROM settings WHERE key='shippingPdfText' AND COALESCE((SELECT value FROM settings WHERE key='manualShippingPriority'),'true')<>'false'").get();
         const documents = [
           ...(shipping?.content ? [{ name: shipping.name || 'Tarif Ongkir Manual PDF', content: shipping.content }] : []),
           ...db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all(),

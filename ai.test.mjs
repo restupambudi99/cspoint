@@ -96,7 +96,7 @@ try {
   await reply(inbound, connection);
   assert.equal(sent.length, 0, 'global auto-reply switch must also be on');
   assert.equal(reads.length, 0, 'disabled AI must not mark messages as read');
-  store.saveSettings({ autoReply: true, dailyLimit: 1 });
+  store.saveSettings({ autoReply: true, dailyLimit: 0 });
   await reply(inbound, connection);
   assert.equal(sent.length, 1);
   assert.deepEqual(reads, [inbound.id], 'enabled AI acknowledges the incoming message before replying');
@@ -107,7 +107,7 @@ try {
   const afterReply = calls;
   await reply(inbound, connection);
   await reply({ ...inbound, id: 'in-2', text: 'Totalnya berapa kak?' }, connection);
-  assert.equal(calls, afterReply + 1, 'AI replies to every new inbound message without a daily cap');
+  assert.equal(calls, afterReply + 1, 'limit 0 means no daily cap');
   assert.equal(sent.length, 2);
   const afterSecondReply = calls;
   store.saveSettings({ dailyLimit: 0 });
@@ -126,7 +126,7 @@ try {
   const scheduledReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {}, now: () => new Date('2026-11-04T05:00:00Z') });
   const beforeSchedule = calls;
   await scheduledReply({ ...inbound, id: 'in-5' }, connection);
-  assert.equal(calls, beforeSchedule + 1, 'AI inbox replies are not suppressed by operating hours');
+  assert.equal(calls, beforeSchedule, 'AI does not reply outside operating hours');
 
   store.saveSettings({ scheduleEnabled: false, dailyLimit: 0 });
   let retryCalls = 0, retrySent = 0, retryDelay = 0;

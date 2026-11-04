@@ -157,7 +157,7 @@ function connect() {
         const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
         if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
         const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
-        const fresh = messages.add(saved);
+        const fresh = store.settings().saveHistory ? messages.add(saved) : true;
         if (!saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
           void replyTo(fresh ? saved : messages.byId(saved.id));
         }
@@ -359,7 +359,7 @@ const server = createServer(async (req, res) => {
       const jid = body.jid === undefined ? `${phone}@s.whatsapp.net` : body.jid;
       if (body.jid !== undefined && (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid))) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
       const result = await socket.sendMessage(jid, { text });
-      messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now() });
+      if (store.settings().saveHistory) messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now() });
       send(res, 200, { id: result.key.id, status: 'submitted' }); return;
     }
 

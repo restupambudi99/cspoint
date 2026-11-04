@@ -1,17 +1,27 @@
 const dayInJakarta = date => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(date);
+const clockInJakarta = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+export function withinSchedule(settings, date) {
+  if (!settings.scheduleEnabled) return true;
+  const time = clockInJakarta.format(date);
+  return time >= settings.scheduleStart && time < settings.scheduleEnd;
+}
 export function createAutoReply({ store, config, router, messages, buildMessages, onError = () => {}, onSuccess = () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = () => new Date() }) {
   let chain = Promise.resolve(), lastSentAt = 0;
   const deliveryAttempts = new Map();
   const allowed = () => store.agent('default').enabled && store.settings().autoReply && config.publicConfig().hasApiKey;
-  return (message, connection) => {
+  const reply = (message, connection) => {
     if (!allowed() || message.outgoing) return Promise.resolve();
     const job = chain.then(async () => {
       if (!connection.isCurrent() || !allowed()) return;
       const settings = store.settings(), agent = store.agent('default'), provider = config.publicConfig();
-      if (!config.claimReply(message.id, dayInJakarta(now()), 0)) return;
+      // Outside operating hours or over the daily limit the message waits in the inbox for a person.
+      if (!withinSchedule(settings, now())) return;
+      if (!config.claimReply(message.id, dayInJakarta(now()), settings.dailyLimit)) return;
       try {
         try { await connection.markRead?.(message); } catch {}
-        const thread = messages.thread(message.jid);
+        const history = messages.thread(message.jid);
+        // With history off the incoming message is not stored, so the AI still needs it added here.
+        const thread = history.some(item => item.id === message.id) ? history : [...history, message];
         const knowledgeQuery = thread.filter(item => !item.outgoing).slice(-4).map(item => item.text).join('\n');
         const knowledge = store.knowledge.relevant(knowledgeQuery || message.text);
         const prompt = buildMessages(agent, thread, store.products.list(), knowledge);
@@ -36,7 +46,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         if (!connection.isCurrent() || !allowed() || store.agent('default').updatedAt !== agent.updatedAt || config.publicConfig().updatedAt !== provider.updatedAt) { config.deferReply(message.id); return; }
         const result = await connection.send(message.jid, { text });
         lastSentAt = now().getTime();
-        messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime() });
+        if (store.settings().saveHistory) messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime() });
         config.finishReply(message.id);
         deliveryAttempts.delete(message.id);
         if (usedFallback) onError(Object.assign(new Error('AI tidak tersedia; pesan bantuan otomatis sudah dikirim.'), { status: error?.status || 502, fallbackSent: true }));
@@ -46,7 +56,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         if (connection.isCurrent() && allowed() && (!Number.isInteger(error?.status) || error.status >= 500 || [408, 429].includes(error.status))) {
           const attempt = Math.min((deliveryAttempts.get(message.id) || 0) + 1, 6);
           deliveryAttempts.set(message.id, attempt);
-          const timer = setTimeout(() => { void autoReply(message, connection); }, Math.min(60000, 1000 * 2 ** attempt));
+          const timer = setTimeout(() => { void reply(message, connection); }, Math.min(60000, 1000 * 2 ** attempt));
           timer.unref?.();
         }
         onError(error);
@@ -55,4 +65,5 @@ export function createAutoReply({ store, config, router, messages, buildMessages
     chain = job;
     return job;
   };
+  return reply;
 }
