@@ -307,7 +307,7 @@ const server = createServer(async (req, res) => {
 
     if (method === 'POST' && path === '/connect') {
       if (status === 'logged_out') { send(res, 409, { ...statusPayload(), error: 'Sesi keluar. Pairing ulang terkontrol diperlukan.' }); return; }
-      if (status === 'connected') { send(res, 200, statusPayload()); return; }
+      if (status === 'connected' || status === 'connecting') { send(res, 200, statusPayload()); return; }
       if (status === 'awaiting_scan') {
         // Force a fresh QR on the same socket generation.
         connectionGeneration++; qr = null; if (socket) retire(socket); socket = null;
@@ -319,11 +319,13 @@ const server = createServer(async (req, res) => {
     if (method === 'POST' && path === '/re-pair') {
       const body = await readJson(req, 4096);
       if (body.confirm !== 'PAIRING-ULANG') { send(res, 400, { error: 'Konfirmasi "PAIRING-ULANG" diperlukan.' }); return; }
-      if (status === 'connected') { send(res, 409, { error: 'Koneksi masih aktif. Putuskan dulu sebelum pairing ulang.' }); return; }
+      const previous = socket, wasConnected = status === 'connected';
       connectionGeneration++;
-      if (socket) retire(socket);
       socket = null;
       clearTimeout(retry); retry = null;
+      // Unlink on WhatsApp too, otherwise the old device stays listed on the phone.
+      if (previous && wasConnected) await Promise.race([previous.logout(), new Promise(resolve => setTimeout(resolve, 10000))]).catch(() => {});
+      if (previous) retire(previous);
       const archived = await resetSession();
       retryAttempt = 0; lastClose = null; connectedAt = null;
       connect();

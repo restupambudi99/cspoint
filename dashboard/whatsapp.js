@@ -56,7 +56,8 @@
         : result.status === 'logged_out' ? 'Sesi keluar'
         : 'Hubungkan WhatsApp';
       image.hidden = result.status !== 'awaiting_scan';
-      repairButton.hidden = result.status !== 'logged_out';
+      repairButton.hidden = !['logged_out', 'connected'].includes(result.status);
+      repairButton.textContent = result.status === 'connected' ? 'Putuskan & pairing ulang' : 'Pairing ulang';
     };
 
     const refresh = async () => {
@@ -99,7 +100,8 @@
     });
 
     repairButton.addEventListener('click', async () => {
-      if (!confirm('Pairing ulang akan mengarsipkan sesi lama lalu membuat QR baru. Lanjutkan?')) return;
+      const active = statusLine.dataset.status === 'connected';
+      if (!confirm(active ? 'WhatsApp yang sedang terhubung akan diputus dan balasan AI berhenti sampai QR baru di-scan. Lanjutkan?' : 'Pairing ulang akan mengarsipkan sesi lama lalu membuat QR baru. Lanjutkan?')) return;
       repairButton.disabled = true;
       try {
         const response = await fetch('/api/whatsapp/re-pair', {
