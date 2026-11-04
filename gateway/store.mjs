@@ -72,6 +72,9 @@ export function openStore(path) {
       if (next.shippingPdfContent && Buffer.byteLength(next.shippingPdfContent, 'base64') > 1000000) throw Object.assign(new Error('Ukuran PDF ongkir melebihi batas 1.000.000 byte'), { status: 413 });
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
       for (const [key, value] of Object.entries(next)) { if (value === undefined) continue; statement.run(key, key === 'couriers' ? JSON.stringify(value) : String(value)); }
+      if (patch.shippingPdfText !== undefined) statement.run('shippingPdfText', String(patch.shippingPdfText));
+      delete next.shippingPdfContent;
+      delete next.shippingPdfMime;
       return next;
     },
 
@@ -115,7 +118,11 @@ export function openStore(path) {
     knowledge: {
       list: () => db.prepare('SELECT id, name, mime, status, created_at, length(content) AS size FROM knowledge ORDER BY created_at DESC LIMIT 200').all(),
       relevant(query) {
-        const documents = db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all();
+        const shipping = db.prepare("SELECT (SELECT value FROM settings WHERE key='shippingPdfName') AS name, value AS content FROM settings WHERE key='shippingPdfText'").get();
+        const documents = [
+          ...(shipping?.content ? [{ name: shipping.name || 'Tarif Ongkir Manual PDF', content: shipping.content }] : []),
+          ...db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all(),
+        ];
         return rankKnowledge(query, documents);
       },
       pendingPdfExtraction: () => db.prepare("SELECT id, name, content FROM knowledge WHERE mime='application/pdf' AND status='PDF tersimpan' AND source_content='' ORDER BY created_at ASC LIMIT 25").all(),

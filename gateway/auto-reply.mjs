@@ -7,7 +7,7 @@ const inSchedule = (settings, date) => {
 };
 
 export function createAutoReply({ store, config, router, messages, buildMessages, onError = () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = () => new Date() }) {
-  let chain = Promise.resolve(), pending = 0;
+  let chain = Promise.resolve(), pending = 0, lastSentAt = 0;
   const allowed = () => store.agent('default').enabled && store.settings().autoReply && config.publicConfig().hasApiKey && inSchedule(store.settings(), now());
   return (message, connection) => {
     if (!allowed() || pending >= 20 || message.outgoing) return Promise.resolve();
@@ -18,11 +18,17 @@ export function createAutoReply({ store, config, router, messages, buildMessages
       if (!config.claimReply(message.id, dayInJakarta(now()), settings.dailyLimit)) return;
       const knowledge = store.knowledge.relevant(message.text);
       const text = await router.complete(buildMessages(agent, messages.thread(message.jid), store.products.list(), knowledge));
-      const seconds = settings.minInterval + Math.random() * (settings.maxInterval - settings.minInterval);
-      await sleep(seconds * 1000);
+      // The interval limits closely spaced sends; it must not add a fixed
+      // delay to the first reply or when AI inference already took longer.
+      if (lastSentAt) {
+        const seconds = settings.minInterval + Math.random() * (settings.maxInterval - settings.minInterval);
+        const remaining = lastSentAt + seconds * 1000 - now().getTime();
+        if (remaining > 0) await sleep(remaining);
+      }
       // A setting change or reconnect while inference ran must cancel the stale send.
       if (!connection.isCurrent() || !allowed() || store.agent('default').updatedAt !== agent.updatedAt || config.publicConfig().updatedAt !== provider.updatedAt) return;
       const result = await connection.send(message.jid, { text });
+      lastSentAt = now().getTime();
       messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, timestamp: now().getTime() });
     }).catch(onError).finally(() => { pending--; });
     chain = job;

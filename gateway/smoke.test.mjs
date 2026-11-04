@@ -2,6 +2,26 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 const token = 'test-only-token-00000000000000000000';
+function pdfWithText(text) {
+  const escaped = text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
+  const stream = `BT /F1 12 Tf 20 50 Td (${escaped}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 100] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${offsets.length}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(pdf).toString('base64');
+}
 const child = spawn(process.execPath, ['server.mjs'], {
   cwd: new URL('.', import.meta.url),
   env: { ...process.env, GATEWAY_TOKEN: token, PORT: '18182', MESSAGE_DB: ':memory:', SESSION_DIR: 'test-session' },
@@ -45,7 +65,7 @@ try {
   result = await json('/settings');
   assert.deepEqual(result.body.couriers, ['JNE', 'SiCepat']);
 
-  result = await json('/settings', { method: 'POST', body: JSON.stringify({ shippingPdfName: 'tarif-ongkir.pdf', shippingPdfContent: 'JVBERi0xLjQ=', shippingPdfMime: 'application/pdf', shippingPdfSize: 42, manualShippingPriority: true }) });
+  result = await json('/settings', { method: 'POST', body: JSON.stringify({ shippingPdfName: 'tarif-ongkir.pdf', shippingPdfContent: pdfWithText('Bubon / Aceh Barat -> Rp40.000'), shippingPdfMime: 'application/pdf', shippingPdfSize: 42, manualShippingPriority: true }) });
   assert.equal(result.body.shippingPdfName, 'tarif-ongkir.pdf');
   assert.equal(result.body.shippingPdfSize, 42);
   assert.equal(result.body.manualShippingPriority, true);

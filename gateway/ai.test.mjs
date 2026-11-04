@@ -28,6 +28,8 @@ const server = createServer(async (req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 let router = createRouterClient(config, { baseUrl: `http://127.0.0.1:${server.address().port}/v1` });
 const store = openStore(':memory:'), messages = openMessages(':memory:');
+store.saveSettings({ shippingPdfName: 'Tarif ongkir.pdf', shippingPdfText: 'Bubon / Aceh Barat → Rp40.000' });
+assert.match(store.knowledge.relevant('Berapa ongkir ke Kecamatan Bubon?')[0].content, /Bubon \/ Aceh Barat → Rp40\.000/);
 try {
   assert.equal(config.publicConfig().hasApiKey, false);
   assert.equal(config.publicConfig().model, 'Hermesollama');
@@ -59,12 +61,14 @@ try {
   missingModel = false;
 
   let sent = [], current = true;
+  const simulatedNow = new Date('2026-11-04T10:00:00+07:00');
   const onError = error => { throw error; };
   const connection = { isCurrent: () => current, send: async (jid, payload) => { sent.push({ jid, ...payload }); return { key: { id: `out-${sent.length}` } }; } };
-  const inbound = { id: 'in-1', jid: '628123450000@s.whatsapp.net', text: 'Halo', outgoing: false, timestamp: Date.now() };
+  const inbound = { id: 'in-1', jid: '628123450000@s.whatsapp.net', text: 'Berapa ongkir ke Kecamatan Bubon?', outgoing: false, timestamp: Date.now() };
   assert.equal(messages.add(inbound), true);
   assert.equal(messages.add(inbound), false, 'duplicate WhatsApp delivery is recognized');
-  const reply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {} });
+  const delays = [];
+  const reply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async ms => { delays.push(ms); }, now: () => simulatedNow });
   await reply(inbound, connection);
   assert.equal(sent.length, 0, 'disabled agent must not send');
   store.saveAgent({ enabled: true });
@@ -73,6 +77,8 @@ try {
   store.saveSettings({ autoReply: true, dailyLimit: 1 });
   await reply(inbound, connection);
   assert.equal(sent.length, 1);
+  assert.equal(delays.length, 0, 'first reply has no artificial interval delay');
+  assert.match(lastPayload.messages[0].content, /Bubon \/ Aceh Barat → Rp40\.000/, 'shipping PDF tariff is included in the AI context');
   assert.equal(messages.thread(inbound.jid).at(-1).outgoing, 1);
   const afterReply = calls;
   await reply(inbound, connection);
@@ -84,9 +90,12 @@ try {
   await reply({ ...inbound, id: 'in-3' }, connection);
   assert.equal(calls, afterReply, 'stale connection must not trigger inference');
   current = true;
-  const cancellingReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => { current = false; } });
-  await cancellingReply({ ...inbound, id: 'in-4' }, connection);
-  assert.equal(sent.length, 1, 'disconnect during inference cancels the send');
+  const cancellingReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => { current = false; }, now: () => simulatedNow });
+  await cancellingReply({ ...inbound, id: 'in-4a' }, connection);
+  const sentBeforeCancelledReply = sent.length;
+  current = true;
+  await cancellingReply({ ...inbound, id: 'in-4b' }, connection);
+  assert.equal(sent.length, sentBeforeCancelledReply, 'disconnect during interval wait cancels the send');
   current = true;
   store.saveSettings({ scheduleEnabled: true, scheduleStart: '08:00', scheduleEnd: '09:00' });
   const scheduledReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {}, now: () => new Date('2026-11-04T05:00:00Z') });

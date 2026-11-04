@@ -319,6 +319,9 @@ const server = createServer(async (req, res) => {
     if (method === 'GET' && path === '/settings') { send(res, 200, store.settings()); return; }
     if (method === 'POST' && path === '/settings') {
       const patch = await readJson(req, 12000000);
+      if (typeof patch.shippingPdfContent === 'string' && patch.shippingPdfMime === 'application/pdf') {
+        patch.shippingPdfText = await extractKnowledgePdf(patch.shippingPdfContent);
+      }
       const agent = store.agent('default');
       if (patch.autoReply === true && (!agent.enabled || !agent.instructions.trim() || !aiConfig.publicConfig().hasApiKey)) {
         send(res, 409, { error: 'Simpan instruksi AI Agent dan koneksi API key 9Router sebelum mengaktifkan balasan AI.' }); return;
