@@ -3,8 +3,8 @@
 Di AI Agent → Pengaturan per Nomor tersedia konfigurasi koneksi 9Router.
 
 1. Masukkan API key 9Router, pilih model/combo, kemudian Simpan Koneksi AI.
-2. Muat Daftar Model membaca ID model dari 9Router. Model awal `Fallback` adalah
-   combo yang terdeteksi pada VPS; simpan kembali jika memilih ID lain.
+2. Muat Daftar Model membaca ID model dari 9Router. Model awal `Hermesollama`
+   mengikuti combo aktif yang dipilih pengguna; simpan kembali jika memilih ID lain.
 3. Uji Balasan AI memanggil model, tanpa mengirim pesan WhatsApp.
 4. Untuk balasan pelanggan, aktifkan AI Agent dan Aktifkan balasan otomatis
    pada Pengaturan. WhatsApp harus terhubung.
@@ -36,3 +36,9 @@ Uji: node gateway/ai.test.mjs, node gateway/ai-http.test.mjs,
 node gateway/smoke.test.mjs. Kedua uji AI menggunakan router tiruan dan key uji,
 tanpa menggunakan akun model atau mengirim pesan WhatsApp nyata.
 Koneksi model yang sebenarnya harus diuji setelah pengguna memasukkan key.
+
+Perbaikan konfigurasi: combo `Fallback` pada VPS menunjuk provider tanpa kredensial
+aktif dan menghasilkan HTTP 404 dari 9Router. Model CSPoint diganti ke `Hermesollama`
+dengan key lama tetap dipertahankan. Pengujian lokal dan HTTPS publik berhasil
+mengembalikan HTTP 200 serta jawaban AI. Error model/provider tidak tersedia kini
+dikembalikan sebagai HTTP 422 dengan petunjuk pengaturan, bukan 502 umum.

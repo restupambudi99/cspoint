@@ -12,10 +12,11 @@ const folder = await mkdtemp(join(tmpdir(), 'cspoint-ai-test-'));
 const path = join(folder, 'qa.sqlite');
 const secret = 'test-only-server-encryption-secret';
 const apiKey = 'qa-router-secret-not-for-production';
-let config = openAiConfig(path, secret), calls = 0, reject = false, lastPayload;
+let config = openAiConfig(path, secret), calls = 0, reject = false, missingModel = false, lastPayload;
 const server = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   assert.equal(req.headers.authorization, `Bearer ${apiKey}`);
+  if (missingModel) { res.writeHead(404); res.end(JSON.stringify({ error: `No active credentials: ${apiKey}` })); return; }
   if (reject) { res.writeHead(401); res.end(JSON.stringify({ error: `Secret ${apiKey}` })); return; }
   if (req.url === '/v1/models') { res.end(JSON.stringify({ data: [{ id: 'Fallback' }] })); return; }
   let raw = '';
@@ -29,6 +30,7 @@ let router = createRouterClient(config, { baseUrl: `http://127.0.0.1:${server.ad
 const store = openStore(':memory:'), messages = openMessages(':memory:');
 try {
   assert.equal(config.publicConfig().hasApiKey, false);
+  assert.equal(config.publicConfig().model, 'Hermesollama');
   assert.throws(() => config.credentials(), /terlebih dahulu/);
   const saved = config.save({ model: 'Fallback', apiKey });
   assert.equal(saved.hasApiKey, true);
@@ -52,6 +54,9 @@ try {
   reject = true;
   await assert.rejects(router.complete(prompt), error => error.status === 502 && !error.message.includes(apiKey));
   reject = false;
+  missingModel = true;
+  await assert.rejects(router.complete(prompt), error => error.status === 422 && /Model\/combo/.test(error.message) && !error.message.includes(apiKey));
+  missingModel = false;
 
   let sent = [], current = true;
   const onError = error => { throw error; };

@@ -8,9 +8,10 @@ import { join } from 'node:path';
 
 const token = 'test-only-gateway-9router-http-token';
 const apiKey = 'test-only-9router-api-key';
-let denied = false;
+let denied = false, missingModel = false;
 const router = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
+  if (missingModel) { res.writeHead(404); res.end(JSON.stringify({ error: `No active credentials: ${apiKey}` })); return; }
   if (denied || req.headers.authorization !== `Bearer ${apiKey}`) {
     res.writeHead(401); res.end(JSON.stringify({ error: `never expose ${apiKey}` })); return;
   }
@@ -44,6 +45,7 @@ try {
   };
   let result = await request('/ai/config');
   assert.equal(result.body.hasApiKey, false);
+  assert.equal(result.body.model, 'Hermesollama');
   assert.equal(result.body.baseUrl, 'http://38.47.191.228:20128/v1');
   assert.equal((await request('/ai/test', { prompt: 'Halo' })).status, 400);
   result = await request('/ai/config', { model: 'Fallback', apiKey });
@@ -57,6 +59,12 @@ try {
   result = await request('/ai/test', { prompt: 'Halo' });
   assert.equal(result.status, 200);
   assert.equal(result.body.reply, 'Halo dari 9Router uji.');
+  missingModel = true;
+  result = await request('/ai/test', { prompt: 'Halo' });
+  assert.equal(result.status, 422);
+  assert.match(result.body.error, /Model\/combo/);
+  assert.equal(JSON.stringify(result.body).includes(apiKey), false);
+  missingModel = false;
   assert.equal((await request('/ai/test', { prompt: '' })).status, 400);
   assert.equal((await request('/ai/config', { model: 'Fallback', apiKey: 'bad\nkey' })).status, 400);
   denied = true;

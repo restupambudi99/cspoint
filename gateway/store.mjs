@@ -66,7 +66,7 @@ export function openStore(path) {
         manualShippingPriority: patch.manualShippingPriority === undefined ? current.manualShippingPriority !== false : Boolean(patch.manualShippingPriority),
       };
       if (next.maxInterval < next.minInterval) next.maxInterval = next.minInterval;
-      if (next.shippingPdfContent && next.shippingPdfContent.length > 500000) throw Object.assign(new Error('Data PDF ongkir melebihi batas 500.000 karakter'), { status: 413 });
+      if (next.shippingPdfContent && Buffer.byteLength(next.shippingPdfContent, 'base64') > 1000000) throw Object.assign(new Error('Ukuran PDF ongkir melebihi batas 1.000.000 byte'), { status: 413 });
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
       for (const [key, value] of Object.entries(next)) { if (value === undefined) continue; statement.run(key, key === 'couriers' ? JSON.stringify(value) : String(value)); }
       return next;

@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
 export const ROUTER_PUBLIC_URL = 'http://38.47.191.228:20128/v1';
+export const DEFAULT_ROUTER_MODEL = 'Hermesollama';
 const invalid = message => Object.assign(new Error(message), { status: 400 });
 
 export function openAiConfig(path, secret) {
@@ -21,7 +22,7 @@ export function openAiConfig(path, secret) {
   return {
     publicConfig() {
       const current = row();
-      return { provider: '9Router', baseUrl: ROUTER_PUBLIC_URL, model: current?.model || 'Fallback', hasApiKey: Boolean(current?.encrypted_key), updatedAt: current?.updated_at || null };
+      return { provider: '9Router', baseUrl: ROUTER_PUBLIC_URL, model: current?.model || DEFAULT_ROUTER_MODEL, hasApiKey: Boolean(current?.encrypted_key), updatedAt: current?.updated_at || null };
     },
     credentials() {
       const current = row();
@@ -35,7 +36,7 @@ export function openAiConfig(path, secret) {
     },
     save(input = {}) {
       const current = row();
-      const model = input.model === undefined ? current?.model || 'Fallback' : input.model;
+      const model = input.model === undefined ? current?.model || DEFAULT_ROUTER_MODEL : input.model;
       if (typeof model !== 'string' || !model.trim() || model.length > 200 || /[\x00-\x1f\x7f]/.test(model)) throw invalid('Nama model 9Router tidak valid.');
       if (input.apiKey !== undefined && (typeof input.apiKey !== 'string' || input.apiKey.length > 4096 || /[\x00-\x1f\x7f]/.test(input.apiKey))) throw invalid('Format API key tidak valid.');
       const key = input.apiKey?.trim();
@@ -70,6 +71,7 @@ export function createRouterClient(config, { baseUrl = process.env.NINE_ROUTER_B
     } catch { throw Object.assign(new Error('9Router tidak dapat dihubungi atau waktu tunggu habis.'), { status: 502 }); }
     if (!response.ok) {
       await response.body?.cancel();
+      if (response.status === 404) throw Object.assign(new Error('Model/combo 9Router tidak tersedia atau provider di dalamnya belum aktif. Periksa model di Koneksi AI.'), { status: 422 });
       const message = [401, 403].includes(response.status) ? 'API key 9Router ditolak. Periksa key dan izin aksesnya.'
         : response.status === 429 ? '9Router sedang membatasi permintaan. Coba kembali nanti.'
           : 'Permintaan ke 9Router gagal. Periksa model dan koneksi provider di 9Router.';
