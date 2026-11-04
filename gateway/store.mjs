@@ -15,9 +15,11 @@ export function openStore(path) {
     CREATE TABLE IF NOT EXISTS forms (id TEXT PRIMARY KEY, name TEXT NOT NULL, fields TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS knowledge (id TEXT PRIMARY KEY, name TEXT NOT NULL, content TEXT NOT NULL, mime TEXT NOT NULL DEFAULT 'text/plain', status TEXT NOT NULL DEFAULT 'siap', created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS agents (instance TEXT PRIMARY KEY, assistant_name TEXT NOT NULL DEFAULT 'Kak', instructions TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS whatsapp_instances (id TEXT PRIMARY KEY, label TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS contacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', tag TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', stage TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
   `);
+  db.prepare('INSERT OR IGNORE INTO whatsapp_instances (id,label,enabled,created_at) VALUES (?,?,1,?)').run('default', 'Nomor utama', now());
   const knowledgeColumns = new Set(db.prepare('PRAGMA table_info(knowledge)').all().map(column => column.name));
   if (!knowledgeColumns.has('source_content')) db.exec("ALTER TABLE knowledge ADD COLUMN source_content TEXT NOT NULL DEFAULT ''");
   const phone = value => String(value ?? '').replace(/\D/g, '').replace(/^0/, '62').slice(0, 15);
@@ -29,6 +31,20 @@ export function openStore(path) {
   };
 
   return {
+    instances: {
+      list: () => db.prepare('SELECT id,label,enabled,created_at FROM whatsapp_instances ORDER BY created_at,id').all().map(row => ({ ...row, enabled: Boolean(row.enabled) })),
+      create(label) {
+        const clean = text(label, 60);
+        if (!clean) throw Object.assign(new Error('Nama nomor wajib diisi.'), { status: 400 });
+        if (db.prepare('SELECT count(*) AS total FROM whatsapp_instances').get().total >= 10) throw Object.assign(new Error('Maksimal 10 nomor WhatsApp.'), { status: 409 });
+        const row = { id: id(), label: clean, enabled: 1, created_at: now() };
+        db.prepare('INSERT INTO whatsapp_instances VALUES (?,?,?,?)').run(row.id, row.label, row.enabled, row.created_at);
+        return { ...row, enabled: true };
+      },
+      setEnabled(instanceId, enabled) { return db.prepare('UPDATE whatsapp_instances SET enabled=? WHERE id=?').run(enabled ? 1 : 0, String(instanceId)).changes > 0; },
+      remove(instanceId) { if (instanceId === 'default') return false; return db.prepare('DELETE FROM whatsapp_instances WHERE id=?').run(String(instanceId)).changes > 0; },
+      has(instanceId) { return Boolean(db.prepare('SELECT 1 FROM whatsapp_instances WHERE id=?').get(String(instanceId))); },
+    },
     settings() {
       const stored = Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(row => [row.key, row.value]));
       return {

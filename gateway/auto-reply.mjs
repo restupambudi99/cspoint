@@ -11,7 +11,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
       if (!config.claimReply(message.id, dayInJakarta(now()), 0)) return;
       try {
         try { await connection.markRead?.(message); } catch {}
-        const thread = messages.thread(message.jid);
+        const thread = messages.thread(message.jid, message.instanceId || 'default');
         const knowledgeQuery = thread.filter(item => !item.outgoing).slice(-4).map(item => item.text).join('\n');
         const knowledge = store.knowledge.relevant(knowledgeQuery || message.text);
         const prompt = buildMessages(agent, thread, store.products.list(), knowledge);
@@ -36,7 +36,8 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         if (!connection.isCurrent() || !allowed() || store.agent('default').updatedAt !== agent.updatedAt || config.publicConfig().updatedAt !== provider.updatedAt) { config.deferReply(message.id); return; }
         const result = await connection.send(message.jid, { text });
         lastSentAt = now().getTime();
-        messages.add({ id: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime() });
+        const instanceId = message.instanceId || 'default';
+        messages.add({ id: `${instanceId === 'default' ? '' : `${instanceId}:`}${result.key.id}`, waId: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime(), instanceId });
         config.finishReply(message.id);
         deliveryAttempts.delete(message.id);
         if (usedFallback) onError(Object.assign(new Error('AI tidak tersedia; pesan bantuan otomatis sudah dikirim.'), { status: error?.status || 502, fallbackSent: true }));

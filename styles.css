@@ -59,6 +59,20 @@ a { color: inherit; text-decoration: none; }
 #wa-connection { display: grid; gap: 16px; }
 #wa-connection img { max-width: 100%; }
 #wa-connection .section-actions { justify-content: flex-start; }
+.instance-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.instance-toolbar .hint { margin-right: auto; }
+.instance-add-form { border: 1px solid var(--line); border-radius: var(--radius); background: var(--soft); padding: 16px; margin-bottom: 14px; }
+.wa-instances { display: grid; gap: 12px; }
+.wa-instance { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 16px; }
+.wa-instance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.wa-instance h3 { font-size: 16px; margin-bottom: 4px; overflow-wrap: anywhere; }
+.instance-index { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.conversation-source { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.wa-instance > .hint { margin-top: 6px; }
+.wa-instance .wa-qr { display: block; width: 240px; max-width: 100%; aspect-ratio: 1; margin: 14px auto; border: 1px solid var(--line); border-radius: 8px; }
+.wa-instance .section-actions { margin-top: 12px; }
+.button.danger { border-color: #efc6c6; background: #fff5f5; color: var(--danger); }
+.button.danger:hover { background: #fee8e8; }
 .main-content { min-width: 0; padding: 0 8px 8px 0; }
 .topbar { display: flex; align-items: center; gap: 16px; min-height: 88px; padding: 18px 24px; background: var(--bg); }
 .topbar > div { flex: 1; min-width: 0; }

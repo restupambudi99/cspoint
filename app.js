@@ -33,7 +33,7 @@ function section(heading, intro, body, action = '') {
 
 function settingsPage() {
   content.innerHTML = [
-    section('Nomor WhatsApp (Instance)', 'Satu nomor WhatsApp per gateway. Status di bawah dibaca langsung dari server.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat status koneksi…</p></div>'),
+    section('Nomor WhatsApp (Instance)', 'Kelola sampai 10 nomor. Setiap nomor memiliki sesi dan QR tersendiri.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat nomor WhatsApp…</p></div>'),
     section('Pengaturan Interval', 'Jeda antar pesan otomatis. Disimpan di database server.', `
       <div class="form-grid">
         <label class="field">Minimum (detik)<input id="set-min" type="number" min="1" max="600" value="2"></label>

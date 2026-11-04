@@ -47,7 +47,9 @@
     const aiToggle = panel.querySelector('#inbox-ai-toggle');
     const aiStatus = panel.querySelector('#inbox-ai-status');
     let selected = '';
+    let selectedInstance = 'default';
     let conversations = [];
+    let instanceLabels = { default: 'Nomor utama' };
     let aiConfiguration = null;
     let lastAiCheck = 0;
     let filter = 'all';
@@ -60,7 +62,7 @@
     const labelFeedback = dialog.querySelector('#label-feedback');
     const colors = new Set(['blue', 'green', 'amber', 'purple', 'rose', 'slate']);
     const chip = label => `<span class="label-chip label-${colors.has(label.color) ? label.color : 'slate'}">${esc(label.name)}</span>`;
-    const renderSelectedLabels = () => { panel.querySelector('#chat-labels').innerHTML = (conversations.find(item => item.jid === selected)?.labels || []).map(chip).join(''); };
+    const renderSelectedLabels = () => { panel.querySelector('#chat-labels').innerHTML = (conversations.find(item => item.jid === selected && item.instanceId === selectedInstance)?.labels || []).map(chip).join(''); };
 
     const drawList = () => {
       const query = panel.querySelector('#inbox-search').value.toLocaleLowerCase('id-ID');
@@ -70,7 +72,9 @@
       panel.querySelector('#unread-total').textContent = conversations.filter(item => item.unreadCount > 0).length;
       list.innerHTML = items.length ? items.map(item => {
         const name = item.name || item.jid.split('@')[0];
-        return `<button class="conversation-row ${item.unreadCount ? 'unread' : 'read'} ${selected === item.jid ? 'selected' : ''}" aria-pressed="${selected === item.jid}" type="button" data-jid="${esc(item.jid)}"><span class="conversation-avatar">${esc(name.slice(0, 1).toUpperCase())}</span><span class="conversation-copy"><strong>${esc(name)}</strong><small>${esc(item.text || 'Belum ada pesan')}</small><span class="label-chips">${(item.labels || []).map(chip).join('')}</span></span><span class="conversation-meta"><time>${item.timestamp ? esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })) : ''}</time><span class="read-state">${item.unreadCount ? `${item.unreadCount} baru` : 'Dibaca'}</span></span></button>`;
+        const active = selected === item.jid && selectedInstance === item.instanceId;
+        const source = instanceLabels[item.instanceId] || (item.instanceId === 'default' ? 'Nomor utama' : 'Nomor tambahan');
+        return `<button class="conversation-row ${item.unreadCount ? 'unread' : 'read'} ${active ? 'selected' : ''}" aria-pressed="${active}" type="button" data-jid="${esc(item.jid)}" data-instance="${esc(item.instanceId || 'default')}"><span class="conversation-avatar">${esc(name.slice(0, 1).toUpperCase())}</span><span class="conversation-copy"><strong>${esc(name)}</strong><small>${esc(item.text || 'Belum ada pesan')}</small><small class="conversation-source">${esc(source)}</small><span class="label-chips">${(item.labels || []).map(chip).join('')}</span></span><span class="conversation-meta"><time>${item.timestamp ? esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })) : ''}</time><span class="read-state">${item.unreadCount ? `${item.unreadCount} baru` : 'Dibaca'}</span></span></button>`;
       }).join('') : `<div class="inbox-empty"><strong>${filter === 'unread' ? 'Tidak ada chat belum dibaca' : 'Percakapan tidak ditemukan'}</strong><span>${query || labelFilter ? 'Coba ubah pencarian atau filter label.' : 'Pesan baru akan tampil di sini.'}</span></div>`;
       renderSelectedLabels();
     };
@@ -78,8 +82,9 @@
     const drawThread = async () => {
       if (!selected) return;
       const jid = selected;
-      const items = await api(`messages?jid=${encodeURIComponent(jid)}`);
-      if (jid !== selected || !panel.isConnected) return;
+      const instanceId = selectedInstance;
+      const items = await api(`messages?jid=${encodeURIComponent(jid)}&instance=${encodeURIComponent(instanceId)}`);
+      if (jid !== selected || instanceId !== selectedInstance || !panel.isConnected) return;
       const nearBottom = history.scrollHeight - history.scrollTop - history.clientHeight < 90;
       const receipts = item => {
         if (!item.outgoing) return '';
@@ -89,13 +94,13 @@
       history.innerHTML = items.length ? items.map(item => `<div class="message-row ${item.outgoing ? 'outgoing' : 'incoming'}"><div class="message-bubble">${esc(item.text)}<small>${esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))}${receipts(item)}</small></div></div>`).join('') : '<div class="chat-empty"><strong>Belum ada pesan</strong></div>';
       if (nearBottom) history.scrollTop = history.scrollHeight;
       const ids = items.filter(item => !item.outgoing && (!item.read_at || !item.receipt_sent_at)).map(item => item.id);
-      if (document.visibilityState === 'visible' && document.hasFocus() && !dialog.open && panel.querySelector('.inbox-chat').getClientRects().length && (ids.length || conversations.find(item => item.jid === jid)?.unreadCount)) {
+      if (document.visibilityState === 'visible' && document.hasFocus() && !dialog.open && panel.querySelector('.inbox-chat').getClientRects().length && (ids.length || conversations.find(item => item.jid === jid && item.instanceId === instanceId)?.unreadCount)) {
         if (reading) return;
-        reading = api('conversations/read', post({ jid, ids }));
+        reading = api('conversations/read', post({ jid, ids, instanceId }));
         let result;
         try { result = await reading; } finally { reading = null; }
-        if (jid !== selected || !panel.isConnected) return;
-        const conversation = conversations.find(item => item.jid === jid);
+        if (jid !== selected || instanceId !== selectedInstance || !panel.isConnected) return;
+        const conversation = conversations.find(item => item.jid === jid && item.instanceId === instanceId);
         if (conversation) conversation.unreadCount = 0;
         drawList();
         if (result.receiptPending) feedback.textContent = 'Chat ditandai dibaca. Laporan baca WhatsApp menunggu koneksi.';
@@ -154,10 +159,11 @@
       const row = event.target.closest('[data-jid]');
       if (!row) return;
       selected = row.dataset.jid;
-      const item = conversations.find(value => value.jid === selected);
+      selectedInstance = row.dataset.instance || 'default';
+      const item = conversations.find(value => value.jid === selected && value.instanceId === selectedInstance);
       const name = item?.name || selected.split('@')[0];
       panel.querySelector('#chat-name').textContent = name;
-      panel.querySelector('#chat-subtitle').textContent = selected.split('@')[0];
+      panel.querySelector('#chat-subtitle').textContent = `${selected.split('@')[0]} · ${item?.instanceId === 'default' ? 'Nomor utama' : 'Nomor tambahan'}`;
       panel.querySelector('#chat-avatar').textContent = name.slice(0, 1).toUpperCase();
       form.hidden = false;
       panel.querySelector('.chat-actions').hidden = false;
@@ -230,7 +236,7 @@
       selected = '';
       try {
         await reading?.catch(() => {});
-        await api('conversations/unread', post({ jid }));
+        await api('conversations/unread', post({ jid, instanceId: selectedInstance }));
         selected = ''; form.hidden = true; panel.querySelector('.chat-actions').hidden = true;
         panel.classList.remove('show-thread');
         panel.querySelector('#chat-name').textContent = 'Pilih percakapan';
@@ -249,7 +255,7 @@
       const button = form.querySelector('button');
       button.disabled = true;
       try {
-        await api('send', post({ jid: selected, text: panel.querySelector('#chat-text').value }));
+        await api('send', post({ jid: selected, instanceId: selectedInstance, text: panel.querySelector('#chat-text').value }));
         panel.querySelector('#chat-text').value = '';
         feedback.textContent = 'Pesan diserahkan ke WhatsApp.';
         await drawThread();
@@ -261,7 +267,9 @@
       if (!panel.isConnected || refreshing) return;
       clearTimeout(timer); refreshing = true;
       try {
-        conversations = await api('conversations');
+        const [nextConversations, instances] = await Promise.all([api('conversations'), api('instances')]);
+        conversations = nextConversations;
+        instanceLabels = Object.fromEntries(instances.map(item => [item.id, item.label]));
         drawList();
         if (selected) await drawThread();
         if (Date.now() - lastAiCheck > 30000) await loadAiMode();

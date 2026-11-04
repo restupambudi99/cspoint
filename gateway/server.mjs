@@ -5,13 +5,14 @@ import { join } from 'node:path';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
-import { openMessages } from './messages.mjs';
+import { openMessages, storedMessageId } from './messages.mjs';
 import { openStore } from './store.mjs';
 import { mcpHandler } from './mcp.mjs';
 import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
 import { createAutoReply } from './auto-reply.mjs';
 import { extractKnowledgePdf } from './pdf-knowledge.mjs';
 import { readConversation } from './read-receipts.mjs';
+import { createInstanceManager } from './instance-manager.mjs';
 
 const token = process.env.GATEWAY_TOKEN;
 if (!token || token.length < 32) throw new Error('GATEWAY_TOKEN must contain at least 32 characters');
@@ -142,7 +143,7 @@ function connect() {
 
   socket = current;
   const isCurrent = () => generation === connectionGeneration && socket === current;
-  const replyTo = message => autoReply(message, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, isCurrent() && status === 'connected' ? current : null, item.jid, [item.id]) });
+  const replyTo = message => autoReply(message, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, isCurrent() && status === 'connected' ? current : null, item.jid, [item.id], 'default') });
 
   current.ev.on('creds.update', () => {
     if (!isCurrent()) return;
@@ -156,7 +157,7 @@ function connect() {
         const jid = message.key?.remoteJid;
         const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
         if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
-        const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
+        const saved = { id: storedMessageId('default', message.key.id), waId: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now(), instanceId: 'default' };
         const fresh = messages.add(saved);
         if (!saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
           void replyTo(fresh ? saved : messages.byId(saved.id));
@@ -167,11 +168,11 @@ function connect() {
 
   current.ev.on('messages.update', updates => {
     if (!isCurrent()) return;
-    for (const { key, update } of updates) messages.updateReceipt(key, update.status);
+    for (const { key, update } of updates) messages.updateReceipt(key, update.status, 'default');
   });
   current.ev.on('message-receipt.update', updates => {
     if (!isCurrent()) return;
-    for (const { key, receipt } of updates) messages.updateReceipt(key, receipt.readTimestamp || receipt.playedTimestamp ? 4 : receipt.receiptTimestamp ? 3 : 0);
+    for (const { key, receipt } of updates) messages.updateReceipt(key, receipt.readTimestamp || receipt.playedTimestamp ? 4 : receipt.receiptTimestamp ? 3 : 0, 'default');
   });
 
   current.ev.on('connection.update', update => {
@@ -218,6 +219,33 @@ function connect() {
     }
   });
 }
+
+async function connectPrimary() {
+  if (status === 'logged_out') throw Object.assign(new Error('Sesi keluar. Putuskan perangkat lalu hubungkan ulang untuk membuat QR baru.'), { status: 409 });
+  store.instances.setEnabled('default', true);
+  if (status === 'connected') return statusPayload();
+  if (status === 'awaiting_scan') {
+    connectionGeneration++; qr = null; if (socket) retire(socket); socket = null;
+  }
+  connect();
+  return statusPayload();
+}
+
+async function disconnectPrimary() {
+  store.instances.setEnabled('default', false);
+  stopping = true; clearTimeout(retry); retry = null; connectionGeneration++;
+  const previous = socket; socket = null; const wasConnected = status === 'connected';
+  qr = null; status = 'idle'; connectedAt = null;
+  try {
+    if (previous) {
+      try { previous.ev.removeAllListeners(); if (wasConnected) await previous.logout(); else previous.end(undefined); } catch { try { previous.end(undefined); } catch {} }
+    }
+    await resetSession();
+  } finally { stopping = false; }
+  return statusPayload();
+}
+
+const instanceManager = createInstanceManager({ store, messages, config: aiConfig, router: aiRouter, buildMessages: buildAiMessages, primaryStatus: statusPayload, primaryConnect: connectPrimary, primaryDisconnect });
 
 async function readJson(req, limit = 1_000_000) {
   let raw = '';
@@ -297,28 +325,33 @@ const server = createServer(async (req, res) => {
     const path = url.pathname;
     const method = req.method;
 
-    if (method === 'GET' && path === '/status') { send(res, 200, statusPayload()); return; }
+    if (method === 'GET' && path === '/instances') { send(res, 200, await instanceManager.list()); return; }
+    if (method === 'POST' && path === '/instances') { const body = await readJson(req, 4096); send(res, 201, await instanceManager.create(body.label)); return; }
+    const instanceDelete = path.match(/^\/instances\/([0-9a-f-]{36})$/i);
+    if (method === 'DELETE' && instanceDelete) { send(res, 200, await instanceManager.remove(instanceDelete[1])); return; }
+
+    const selectedInstance = url.searchParams.get('instance') || 'default';
+    if (method === 'GET' && path === '/status') { send(res, 200, await instanceManager.status(selectedInstance)); return; }
 
     if (method === 'GET' && path === '/qr') {
+      if (selectedInstance !== 'default') { send(res, 200, await instanceManager.qr(selectedInstance)); return; }
       if (!qr) { send(res, 409, statusPayload()); return; }
       send(res, 200, { image: await QRCode.toDataURL(qr) }); return;
     }
 
     if (method === 'POST' && path === '/connect') {
-      if (status === 'logged_out') { send(res, 409, { ...statusPayload(), error: 'Sesi keluar. Pairing ulang terkontrol diperlukan.' }); return; }
-      if (status === 'connected') { send(res, 200, statusPayload()); return; }
-      if (status === 'awaiting_scan') {
-        // Force a fresh QR on the same socket generation.
-        connectionGeneration++; qr = null; if (socket) retire(socket); socket = null;
-      }
-      connect();
-      send(res, 200, statusPayload()); return;
+      send(res, 200, await instanceManager.connect(selectedInstance)); return;
+    }
+
+    if (method === 'POST' && path === '/disconnect') {
+      send(res, 200, await instanceManager.disconnect(selectedInstance)); return;
     }
 
     if (method === 'POST' && path === '/re-pair') {
       const body = await readJson(req, 4096);
       if (body.confirm !== 'PAIRING-ULANG') { send(res, 400, { error: 'Konfirmasi "PAIRING-ULANG" diperlukan.' }); return; }
       if (status === 'connected') { send(res, 409, { error: 'Koneksi masih aktif. Putuskan dulu sebelum pairing ulang.' }); return; }
+      store.instances.setEnabled('default', true);
       connectionGeneration++;
       if (socket) retire(socket);
       socket = null;
@@ -330,7 +363,8 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (method === 'GET' && path === '/conversations') { send(res, 200, messages.list()); return; }    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
+    if (method === 'GET' && path === '/conversations') { send(res, 200, messages.list()); return; }
+    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '', url.searchParams.get('instance') || 'default')); return; }
 
     if (method === 'GET' && path === '/labels') { send(res, 200, messages.labels()); return; }
     if (method === 'POST' && path === '/labels') { send(res, 200, messages.saveLabel(await readJson(req, 4000))); return; }
@@ -342,25 +376,34 @@ const server = createServer(async (req, res) => {
     }
     if (method === 'POST' && path === '/conversations/unread') {
       const body = await readJson(req, 4000);
-      messages.markUnread(body.jid);
+      messages.markUnread(body.jid, body.instanceId || 'default');
       send(res, 200, { unread: true }); return;
     }
     if (method === 'POST' && path === '/conversations/read') {
       const body = await readJson(req, 50000);
-      send(res, 200, await readConversation(messages, status === 'connected' ? socket : null, body.jid, body.ids)); return;
+      const instanceId = body.instanceId || 'default';
+      send(res, 200, instanceId === 'default'
+        ? await readConversation(messages, status === 'connected' ? socket : null, body.jid, body.ids, instanceId)
+        : await instanceManager.read(instanceId, body.jid, body.ids)); return;
     }
 
     if (method === 'POST' && path === '/send') {
-      if (status !== 'connected' || !socket) { send(res, 409, { error: 'WhatsApp belum terhubung. Scan QR di Pengaturan.' }); return; }
       const body = await readJson(req, 200000);
       const phone = String(body.phone || '').replace(/\D/g, '').replace(/^0/, '62');
       const text = typeof body.text === 'string' ? body.text.trim() : '';
       if ((body.jid === undefined && !/^\d{8,15}$/.test(phone)) || !text || text.length > 4000) { send(res, 400, { error: 'Nomor atau pesan tidak valid' }); return; }
       const jid = body.jid === undefined ? `${phone}@s.whatsapp.net` : body.jid;
-      if (body.jid !== undefined && (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid))) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
-      const result = await socket.sendMessage(jid, { text });
-      messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now() });
-      send(res, 200, { id: result.key.id, status: 'submitted' }); return;
+      let instanceId = body.instanceId || (body.jid ? messages.instanceForConversation(jid) : 'default');
+      if (body.jid === undefined && !body.instanceId && status !== 'connected') instanceId = (await instanceManager.list()).find(item => item.status === 'connected')?.id || 'default';
+      if (body.jid !== undefined && (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid, instanceId))) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
+      let result;
+      if (instanceId === 'default') {
+        if (status !== 'connected' || !socket) { send(res, 409, { error: 'Nomor WhatsApp utama belum terhubung.' }); return; }
+        result = await socket.sendMessage(jid, { text });
+      } else result = await instanceManager.send(instanceId, jid, text);
+      const id = storedMessageId(instanceId, result.key.id);
+      messages.add({ id, waId: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now(), instanceId });
+      send(res, 200, { id, status: 'submitted' }); return;
     }
 
     if (method === 'GET' && path === '/settings') { send(res, 200, store.settings()); return; }
@@ -416,12 +459,13 @@ const server = createServer(async (req, res) => {
   }
 });
 
+await instanceManager.startSaved();
 server.listen(Number(process.env.PORT || 18181), '127.0.0.1');
 
 // A saved linked-device session must reconnect after a service restart.
 // Baileys only sets creds.registered during pairing-code linking, so the presence
 // of creds.me is the reliable signal that a QR-paired session already exists.
-if (hasSession()) connect();
+if (hasSession() && store.instances.list().find(item => item.id === 'default')?.enabled) connect();
 
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   stopping = true; clearTimeout(retry); retry = null;

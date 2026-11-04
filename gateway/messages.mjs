@@ -1,18 +1,33 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 export const LABEL_COLORS = ['blue', 'green', 'amber', 'purple', 'rose', 'slate'];
+export const storedMessageId = (instanceId, whatsappId) => instanceId === 'default' ? whatsappId : `${instanceId}:${whatsappId}`;
 const invalid = message => Object.assign(new Error(message), { status: 400 });
 export function openMessages(path) {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, jid TEXT NOT NULL, name TEXT NOT NULL, text TEXT NOT NULL, outgoing INTEGER NOT NULL, timestamp INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS messages_jid_time ON messages(jid,timestamp);');
+  const messageColumns = new Set(db.prepare('PRAGMA table_info(messages)').all().map(row => row.name));
+  if (!messageColumns.has('instance_id')) db.exec("ALTER TABLE messages ADD COLUMN instance_id TEXT NOT NULL DEFAULT 'default'");
+  if (!messageColumns.has('wa_id')) { db.exec("ALTER TABLE messages ADD COLUMN wa_id TEXT NOT NULL DEFAULT ''"); db.exec('UPDATE messages SET wa_id=id WHERE wa_id=\'\''); }
   db.exec(`PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS conversation_state (jid TEXT PRIMARY KEY, force_unread INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS message_status (jid TEXT NOT NULL, id TEXT NOT NULL, status INTEGER NOT NULL, PRIMARY KEY(jid,id));
     CREATE TABLE IF NOT EXISTS inbox_labels (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, color TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS conversation_labels (jid TEXT NOT NULL, label_id TEXT NOT NULL REFERENCES inbox_labels(id) ON DELETE CASCADE, PRIMARY KEY(jid,label_id));
     CREATE TABLE IF NOT EXISTS inbox_meta (key TEXT PRIMARY KEY);`);
+  const stateInfo = db.prepare('PRAGMA table_info(conversation_state)').all();
+  const stateHasInstance = stateInfo.some(column => column.name === 'instance_id');
+  if (!stateHasInstance) {
+    db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE conversation_state_next (jid TEXT NOT NULL, instance_id TEXT NOT NULL DEFAULT 'default', force_unread INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(jid,instance_id));
+      INSERT INTO conversation_state_next (jid,instance_id,force_unread) SELECT jid,'default',force_unread FROM conversation_state;
+      DROP TABLE conversation_state;
+      ALTER TABLE conversation_state_next RENAME TO conversation_state;
+      COMMIT;`);
+  }
   const columns = new Set(db.prepare('PRAGMA table_info(messages)').all().map(row => row.name));
   for (const column of ['read_at', 'receipt_sent_at']) if (!columns.has(column)) db.exec(`ALTER TABLE messages ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
+  db.exec('CREATE INDEX IF NOT EXISTS messages_instance_jid_time ON messages(instance_id,jid,timestamp)');
   if (!db.prepare('SELECT 1 FROM inbox_meta WHERE key=?').get('labels-seeded')) {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -21,52 +36,61 @@ export function openMessages(path) {
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
-  const hasConversation = jid => Boolean(db.prepare('SELECT 1 FROM messages WHERE jid=? LIMIT 1').get(jid));
-  const requireConversation = jid => { if (typeof jid !== 'string' || !hasConversation(jid)) throw invalid('Percakapan tidak ditemukan.'); };
+  const hasConversation = (jid, instanceId) => Boolean(instanceId === undefined
+    ? db.prepare('SELECT 1 FROM messages WHERE jid=? LIMIT 1').get(jid)
+    : db.prepare('SELECT 1 FROM messages WHERE jid=? AND instance_id=? LIMIT 1').get(jid, instanceId));
+  const requireConversation = (jid, instanceId) => { if (typeof jid !== 'string' || !hasConversation(jid, instanceId)) throw invalid('Percakapan tidak ditemukan.'); };
   return {
     add(message) {
-      const inserted = db.prepare('INSERT OR IGNORE INTO messages (id,jid,name,text,outgoing,timestamp) VALUES (?,?,?,?,?,?)').run(message.id, message.jid, message.name || '', message.text, message.outgoing ? 1 : 0, message.timestamp).changes > 0;
-      if (message.outgoing || Number.isInteger(message.status)) this.updateReceipt({ remoteJid: message.jid, id: message.id, fromMe: Boolean(message.outgoing) }, message.status ?? 1);
-      const receipt = db.prepare('SELECT status FROM message_status WHERE jid=? AND id=?').get(message.jid, message.id);
-      if (!message.outgoing && receipt?.status >= 4) this.markRead(message.jid, [message.id], true);
+      const instanceId = message.instanceId || 'default';
+      const waId = message.waId || message.id;
+      const id = storedMessageId(instanceId, waId);
+      const inserted = db.prepare('INSERT OR IGNORE INTO messages (id,jid,name,text,outgoing,timestamp,instance_id,wa_id) VALUES (?,?,?,?,?,?,?,?)').run(id, message.jid, message.name || '', message.text, message.outgoing ? 1 : 0, message.timestamp, instanceId, waId).changes > 0;
+      if (message.outgoing || Number.isInteger(message.status)) this.updateReceipt({ remoteJid: message.jid, id: waId, fromMe: Boolean(message.outgoing) }, message.status ?? 1, instanceId);
+      const receipt = db.prepare('SELECT status FROM message_status WHERE jid=? AND id=?').get(message.jid, id);
+      if (!message.outgoing && receipt?.status >= 4) this.markRead(message.jid, [id], true, instanceId);
       return inserted;
     },
     list() {
-      const rows = db.prepare(`SELECT m.id,m.jid,m.text,m.outgoing,m.timestamp,
-        COALESCE((SELECT n.name FROM messages n WHERE n.jid=m.jid AND n.outgoing=0 AND n.name<>'' ORDER BY n.timestamp DESC,n.rowid DESC LIMIT 1),'') AS name,
-        MAX((SELECT count(*) FROM messages n WHERE n.jid=m.jid AND n.outgoing=0 AND n.read_at=0),COALESCE(s.force_unread,0)) AS unreadCount
-        FROM messages m LEFT JOIN conversation_state s ON s.jid=m.jid
-        WHERE m.rowid=(SELECT n.rowid FROM messages n WHERE n.jid=m.jid ORDER BY n.timestamp DESC,n.rowid DESC LIMIT 1)
+      const rows = db.prepare(`SELECT m.id,m.jid,m.text,m.outgoing,m.timestamp,m.instance_id AS instanceId,
+        COALESCE((SELECT n.name FROM messages n WHERE n.jid=m.jid AND n.instance_id=m.instance_id AND n.outgoing=0 AND n.name<>'' ORDER BY n.timestamp DESC,n.rowid DESC LIMIT 1),'') AS name,
+        MAX((SELECT count(*) FROM messages n WHERE n.jid=m.jid AND n.instance_id=m.instance_id AND n.outgoing=0 AND n.read_at=0),COALESCE(s.force_unread,0)) AS unreadCount
+        FROM messages m LEFT JOIN conversation_state s ON s.jid=m.jid AND s.instance_id=m.instance_id
+        WHERE m.rowid=(SELECT n.rowid FROM messages n WHERE n.jid=m.jid AND n.instance_id=m.instance_id ORDER BY n.timestamp DESC,n.rowid DESC LIMIT 1)
         ORDER BY m.timestamp DESC LIMIT 200`).all();
       const labels = db.prepare('SELECT c.jid,l.* FROM conversation_labels c JOIN inbox_labels l ON l.id=c.label_id ORDER BY l.name').all();
       return rows.map(row => ({ ...row, labels: labels.filter(label => label.jid === row.jid).map(({ jid, ...label }) => label) }));
     },
-    thread(jid) {
+    thread(jid, instanceId = 'default') {
       return db.prepare(`SELECT m.*,COALESCE(s.status,0) AS status FROM
-        (SELECT rowid AS sequence,* FROM messages WHERE jid=? ORDER BY timestamp DESC,rowid DESC LIMIT 200) m
-        LEFT JOIN message_status s ON s.jid=m.jid AND s.id=m.id ORDER BY m.timestamp,m.sequence`).all(jid);
+        (SELECT rowid AS sequence,* FROM messages WHERE jid=? AND instance_id=? ORDER BY timestamp DESC,rowid DESC LIMIT 200) m
+        LEFT JOIN message_status s ON s.jid=m.jid AND s.id=m.id ORDER BY m.timestamp,m.sequence`).all(jid, instanceId);
     },
-    byId(messageId) { return db.prepare('SELECT id,jid,name,text,outgoing,timestamp FROM messages WHERE id=?').get(messageId); },
-    readKeys(jid, ids) {
-      requireConversation(jid);
+    byId(messageId) { return db.prepare('SELECT id,wa_id AS waId,jid,name,text,outgoing,timestamp,instance_id AS instanceId FROM messages WHERE id=?').get(messageId); },
+    instanceForConversation(jid) { return db.prepare('SELECT instance_id AS instanceId FROM messages WHERE jid=? ORDER BY timestamp DESC,rowid DESC LIMIT 1').get(jid)?.instanceId || 'default'; },
+    readKeys(jid, ids, instanceId = 'default') {
+      requireConversation(jid, instanceId);
       if (!Array.isArray(ids) || ids.length > 200 || ids.some(id => typeof id !== 'string' || id.length > 200)) throw invalid('Daftar pesan tidak valid.');
-      const find = db.prepare('SELECT id,jid FROM messages WHERE id=? AND jid=? AND outgoing=0 AND receipt_sent_at=0');
-      return [...new Set(ids)].map(id => find.get(id, jid)).filter(Boolean).map(row => ({ remoteJid: row.jid, id: row.id, fromMe: false }));
+      const find = db.prepare('SELECT wa_id,jid FROM messages WHERE id=? AND jid=? AND instance_id=? AND outgoing=0 AND receipt_sent_at=0');
+      return [...new Set(ids)].map(id => find.get(id, jid, instanceId)).filter(Boolean).map(row => ({ remoteJid: row.jid, id: row.wa_id, fromMe: false }));
     },
-    markRead(jid, ids, receiptSent = false) {
+    markRead(jid, ids, receiptSent = false, instanceId = 'default') {
       const update = db.prepare('UPDATE messages SET read_at=CASE WHEN read_at=0 THEN ? ELSE read_at END,receipt_sent_at=CASE WHEN ? THEN ? ELSE receipt_sent_at END WHERE jid=? AND id=? AND outgoing=0');
       const now = Date.now();
       for (const id of ids) update.run(now, receiptSent ? 1 : 0, now, jid, id);
-      db.prepare('INSERT INTO conversation_state VALUES (?,0) ON CONFLICT(jid) DO UPDATE SET force_unread=0').run(jid);
+      db.prepare('INSERT INTO conversation_state (jid,instance_id,force_unread) VALUES (?,?,0) ON CONFLICT(jid,instance_id) DO UPDATE SET force_unread=0').run(jid, instanceId);
     },
-    markUnread(jid) {
-      requireConversation(jid);
-      db.prepare('INSERT INTO conversation_state VALUES (?,1) ON CONFLICT(jid) DO UPDATE SET force_unread=1').run(jid);
+    markUnread(jid, instanceId = 'default') {
+      requireConversation(jid, instanceId);
+      db.prepare('INSERT INTO conversation_state (jid,instance_id,force_unread) VALUES (?,?,1) ON CONFLICT(jid,instance_id) DO UPDATE SET force_unread=1').run(jid, instanceId);
     },
-    updateReceipt(key, status) {
+    updateReceipt(key, status, instanceId = 'default') {
       if (!key?.remoteJid || !key.id || !Number.isInteger(status) || status < 1 || status > 5) return;
-      db.prepare('INSERT INTO message_status VALUES (?,?,?) ON CONFLICT(jid,id) DO UPDATE SET status=MAX(status,excluded.status)').run(key.remoteJid, key.id, status);
-      if (key.fromMe === false && status >= 4) this.markRead(key.remoteJid, [key.id], true);
+      const stored = db.prepare('SELECT id FROM messages WHERE instance_id=? AND jid=? AND wa_id=?').get(instanceId, key.remoteJid, key.id);
+      const id = stored?.id || (instanceId === 'default' ? key.id : null);
+      if (!id) return;
+      db.prepare('INSERT INTO message_status VALUES (?,?,?) ON CONFLICT(jid,id) DO UPDATE SET status=MAX(status,excluded.status)').run(key.remoteJid, id, status);
+      if (key.fromMe === false && status >= 4) this.markRead(key.remoteJid, [id], true, instanceId);
     },
     labels() { return db.prepare('SELECT * FROM inbox_labels ORDER BY name COLLATE NOCASE').all(); },
     saveLabel(input) {
