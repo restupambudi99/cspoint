@@ -27,6 +27,19 @@ export function openMessages(path) {
       ALTER TABLE conversation_state_next RENAME TO conversation_state;
       COMMIT;`);
   }
+  const missingMemories = db.prepare("SELECT DISTINCT m.jid FROM messages m LEFT JOIN conversation_memory c ON c.jid=m.jid WHERE c.jid IS NULL AND trim(m.text)<>''").all();
+  if (missingMemories.length) {
+    const recentMessages = db.prepare("SELECT id,text,outgoing,timestamp FROM messages WHERE jid=? AND trim(text)<>'' ORDER BY timestamp DESC,rowid DESC LIMIT 12");
+    const saveMemory = db.prepare('INSERT OR IGNORE INTO conversation_memory (jid,entries,updated_at) VALUES (?,?,?)');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const { jid } of missingMemories) {
+        const entries = recentMessages.all(jid).reverse().map(entry => ({ ...entry, text: entry.text.slice(-240), outgoing: Boolean(entry.outgoing) }));
+        if (entries.length) saveMemory.run(jid, JSON.stringify(entries), Date.now());
+      }
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
   if (!db.prepare('SELECT 1 FROM inbox_meta WHERE key=?').get('labels-seeded')) {
     db.exec('BEGIN IMMEDIATE');
     try {
