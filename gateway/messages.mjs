@@ -14,6 +14,7 @@ export function openMessages(path) {
     CREATE TABLE IF NOT EXISTS message_status (jid TEXT NOT NULL, id TEXT NOT NULL, status INTEGER NOT NULL, PRIMARY KEY(jid,id));
     CREATE TABLE IF NOT EXISTS inbox_labels (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, color TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS conversation_labels (jid TEXT NOT NULL, label_id TEXT NOT NULL REFERENCES inbox_labels(id) ON DELETE CASCADE, PRIMARY KEY(jid,label_id));
+    CREATE TABLE IF NOT EXISTS conversation_memory (jid TEXT NOT NULL, instance_id TEXT NOT NULL, entries TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL, PRIMARY KEY(jid,instance_id));
     CREATE TABLE IF NOT EXISTS inbox_meta (key TEXT PRIMARY KEY);`);
   const stateInfo = db.prepare('PRAGMA table_info(conversation_state)').all();
   const stateHasInstance = stateInfo.some(column => column.name === 'instance_id');
@@ -46,6 +47,15 @@ export function openMessages(path) {
       const waId = message.waId || message.id;
       const id = storedMessageId(instanceId, waId);
       const inserted = db.prepare('INSERT OR IGNORE INTO messages (id,jid,name,text,outgoing,timestamp,instance_id,wa_id) VALUES (?,?,?,?,?,?,?,?)').run(id, message.jid, message.name || '', message.text, message.outgoing ? 1 : 0, message.timestamp, instanceId, waId).changes > 0;
+      if (inserted && typeof message.text === 'string' && message.text.trim()) {
+        const existing = db.prepare('SELECT entries FROM conversation_memory WHERE jid=? AND instance_id=?').get(message.jid, instanceId);
+        let entries = [];
+        try { entries = JSON.parse(existing?.entries || '[]'); } catch {}
+        entries = Array.isArray(entries) ? entries.filter(entry => typeof entry?.text === 'string').slice(-11) : [];
+        entries.push({ id, text: message.text.trim().slice(-240), outgoing: Boolean(message.outgoing), timestamp: message.timestamp });
+        db.prepare('INSERT INTO conversation_memory (jid,instance_id,entries,updated_at) VALUES (?,?,?,?) ON CONFLICT(jid,instance_id) DO UPDATE SET entries=excluded.entries,updated_at=excluded.updated_at')
+          .run(message.jid, instanceId, JSON.stringify(entries.slice(-12)), Date.now());
+      }
       if (message.outgoing || Number.isInteger(message.status)) this.updateReceipt({ remoteJid: message.jid, id: waId, fromMe: Boolean(message.outgoing) }, message.status ?? 1, instanceId);
       const receipt = db.prepare('SELECT status FROM message_status WHERE jid=? AND id=?').get(message.jid, id);
       if (!message.outgoing && receipt?.status >= 4) this.markRead(message.jid, [id], true, instanceId);
@@ -67,6 +77,11 @@ export function openMessages(path) {
         LEFT JOIN message_status s ON s.jid=m.jid AND s.id=m.id ORDER BY m.timestamp,m.sequence`).all(jid, instanceId);
     },
     byId(messageId) { return db.prepare('SELECT id,wa_id AS waId,jid,name,text,outgoing,timestamp,instance_id AS instanceId FROM messages WHERE id=?').get(messageId); },
+    memory(jid, instanceId = 'default') {
+      const entries = db.prepare('SELECT entries FROM conversation_memory WHERE jid=? AND instance_id=?').get(jid, instanceId)?.entries;
+      try { const parsed = JSON.parse(entries || '[]'); return Array.isArray(parsed) ? parsed.filter(entry => typeof entry?.text === 'string').slice(-12) : []; }
+      catch { return []; }
+    },
     instanceForConversation(jid) { return db.prepare('SELECT instance_id AS instanceId FROM messages WHERE jid=? ORDER BY timestamp DESC,rowid DESC LIMIT 1').get(jid)?.instanceId || 'default'; },
     readKeys(jid, ids, instanceId = 'default') {
       requireConversation(jid, instanceId);

@@ -133,7 +133,7 @@ async function drawAgent() {
         <label class="check"><input id="agent-enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Aktifkan AI Agent</label>
       </div>
       <div class="section-actions"><button class="button" data-save-agent>Simpan Agent</button><p role="status" id="agent-result" class="hint"></p></div>
-      <p class="hint">Balasan WhatsApp otomatis memerlukan koneksi 9Router, AI Agent aktif, dan mode AI aktif di Kotak Masuk. Knowledge PDF yang relevan disertakan saat AI menjawab.</p>`;
+      <p class="hint">Balasan otomatis memakai instruksi, Knowledge PDF, dan memori ringkas hingga 12 pesan terakhir per percakapan. AI memakai konteks tersimpan, bukan melatih model; data lama membantu jawaban nyambung dan tidak menanyakan ulang hal yang sudah dijawab. AI Agent memerlukan koneksi 9Router, AI Agent aktif, dan mode AI aktif di Kotak Masuk.</p>`;
   } catch (error) {
     panel.innerHTML = `<p class="empty">Gagal memuat agent: ${esc(error.message)}</p>`;
   }

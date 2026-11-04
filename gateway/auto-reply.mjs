@@ -11,10 +11,12 @@ export function createAutoReply({ store, config, router, messages, buildMessages
       if (!config.claimReply(message.id, dayInJakarta(now()), 0)) return;
       try {
         try { await connection.markRead?.(message); } catch {}
-        const thread = messages.thread(message.jid, message.instanceId || 'default');
-        const knowledgeQuery = thread.filter(item => !item.outgoing).slice(-4).map(item => item.text).join('\n');
+        const instanceId = message.instanceId || 'default';
+        const thread = messages.thread(message.jid, instanceId);
+        const memory = messages.memory(message.jid, instanceId);
+        const knowledgeQuery = [...memory.map(item => item.text), ...thread.filter(item => !item.outgoing).slice(-4).map(item => item.text)].join('\n');
         const knowledge = store.knowledge.relevant(knowledgeQuery || message.text);
-        const prompt = buildMessages(agent, thread, store.products.list(), knowledge);
+        const prompt = buildMessages(agent, thread, store.products.list(), knowledge, memory);
         let text, error;
         for (let attempt = 0; attempt < 4; attempt++) {
           try { text = await router.complete(prompt); break; }
@@ -36,7 +38,6 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         if (!connection.isCurrent() || !allowed() || store.agent('default').updatedAt !== agent.updatedAt || config.publicConfig().updatedAt !== provider.updatedAt) { config.deferReply(message.id); return; }
         const result = await connection.send(message.jid, { text });
         lastSentAt = now().getTime();
-        const instanceId = message.instanceId || 'default';
         messages.add({ id: `${instanceId === 'default' ? '' : `${instanceId}:`}${result.key.id}`, waId: result.key.id, jid: message.jid, name: agent.assistantName, text, outgoing: true, status: result.status, timestamp: now().getTime(), instanceId });
         config.finishReply(message.id);
         deliveryAttempts.delete(message.id);
