@@ -69,6 +69,7 @@
       if (!agent.enabled) aiStatus.textContent = 'Nonaktif. Balas pesan secara manual. Aktifkan Agent di menu AI Agent untuk memakai balasan otomatis.';
       else if (!config.hasApiKey) aiStatus.textContent = 'Nonaktif. Simpan koneksi API key 9Router di menu AI Agent terlebih dahulu.';
       else if (!agent.instructions?.trim()) aiStatus.textContent = 'Instruksi Agent belum tersimpan. Simpan instruksi di menu AI Agent sebelum mengaktifkan balasan.';
+      else if (settings.autoReply && whatsapp.aiReplyFailure) aiStatus.textContent = `Balasan terakhir gagal: ${whatsapp.aiReplyFailure.message}`;
       else if (settings.autoReply && whatsapp.status !== 'connected') aiStatus.textContent = 'Mode AI aktif; balasan berjalan saat WhatsApp terhubung.';
       else if (settings.autoReply) aiStatus.textContent = 'AI aktif. Balasan memakai instruksi dan Knowledge PDF; batas jadwal/kuota mengikuti Pengaturan.';
       else aiStatus.textContent = 'AI nonaktif. Anda membalas pesan secara manual.';

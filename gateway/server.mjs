@@ -29,9 +29,20 @@ for (;;) {
 const aiConfig = openAiConfig(dbPath, token);
 const currentAgent = store.agent('default');
 if (store.settings().autoReply && (!currentAgent.enabled || !currentAgent.instructions.trim() || !aiConfig.publicConfig().hasApiKey)) store.saveSettings({ autoReply: false });
+let autoReplyFailure = null;
 const aiRouter = createRouterClient(aiConfig);
 const autoReply = createAutoReply({ store, config: aiConfig, router: aiRouter, messages, buildMessages: buildAiMessages,
-  onError: () => console.error('AI auto-reply failed; no automatic retry will be sent'),
+  onError: error => {
+    const code = Number.isInteger(error?.status) ? error.status : 500;
+    const message = code === 400 ? 'Konfigurasi AI tidak valid.'
+      : code === 401 ? 'API key 9Router ditolak.'
+        : code === 422 ? 'Model 9Router tidak tersedia atau responsnya tidak valid.'
+          : code === 502 ? '9Router atau pengiriman WhatsApp gagal setelah satu kali percobaan ulang.'
+            : 'Balasan AI gagal diproses.';
+    autoReplyFailure = { code, message, at: Date.now() };
+    console.error(`AI auto-reply failed (status=${code})`);
+  },
+  onSuccess: () => { autoReplyFailure = null; },
 });
 const handleMcp = mcpHandler({ token: process.env.MCP_TOKEN, messages, getStatus: () => status });
 
@@ -93,6 +104,7 @@ function statusPayload() {
     lastClose,
     hasSession: hasSession(),
     retryPending: Boolean(retry),
+    aiReplyFailure: autoReplyFailure,
   };
 }
 

@@ -102,6 +102,20 @@ try {
   const beforeSchedule = calls;
   await scheduledReply({ ...inbound, id: 'in-5' }, connection);
   assert.equal(calls, beforeSchedule, 'outside configured Jakarta hours must not trigger inference');
+
+  store.saveSettings({ scheduleEnabled: false, dailyLimit: 0 });
+  let retryCalls = 0, retrySent = 0, retryDelay = 0;
+  const retryReply = createAutoReply({
+    store, config, messages, buildMessages: buildAiMessages,
+    router: { complete: async () => { if (++retryCalls === 1) throw Object.assign(new Error('temporary upstream error'), { status: 502 }); return 'Tarif ditemukan.'; } },
+    sleep: async ms => { retryDelay = ms; },
+    onError: error => { throw error; },
+    now: () => simulatedNow,
+  });
+  await retryReply({ ...inbound, id: 'in-6' }, { isCurrent: () => true, send: async () => { retrySent++; return { key: { id: 'out-retry' } }; } });
+  assert.equal(retryCalls, 2, 'temporary router failure receives one retry');
+  assert.equal(retryDelay, 1000, 'retry waits briefly before contacting 9Router again');
+  assert.equal(retrySent, 1, 'retry sends only one WhatsApp reply');
   console.log('PASS: encrypted key persistence/redaction, 9Router auth/models/completions, sanitized errors, auto-reply switches, history, deduplication, daily cap, reconnect cancellation and schedule');
 } finally {
   config.close(); store.close(); messages.close();
