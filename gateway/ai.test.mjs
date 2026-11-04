@@ -102,7 +102,7 @@ try {
   assert.deepEqual(reads, [inbound.id], 'enabled AI acknowledges the incoming message before replying');
   assert.equal(delays.length, 0, 'first reply has no artificial interval delay');
   assert.match(lastPayload.messages[0].content, /Bubon \/ Aceh Barat → Rp40\.000/, 'shipping PDF tariff is included in the AI context');
-  assert.match(lastPayload.messages[0].content, /Arahkan closing/);
+  assert.match(lastPayload.messages[0].content, /Arahkan percakapan sampai closing/);
   assert.equal(messages.thread(inbound.jid).at(-1).outgoing, 1);
   const afterReply = calls;
   await reply(inbound, connection);

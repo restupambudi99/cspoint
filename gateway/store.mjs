@@ -85,7 +85,8 @@ export function openStore(path) {
         if (!name) throw Object.assign(new Error('Nama produk wajib diisi'), { status: 400 });
         const row = { id: id(), name, sku: text(input.sku, 60), price: text(input.price, 240), stock: Math.max(0, int(input.stock)), description: text(input.description, 2000), created_at: now() };
         db.prepare('INSERT INTO products VALUES (?,?,?,?,?,?,?)').run(row.id, row.name, row.sku, row.price, row.stock, row.description, row.created_at);
-        return row;
+        // Return the persisted row so POST and GET expose the same value types.
+        return db.prepare('SELECT * FROM products WHERE id=?').get(row.id);
       },
       remove(productId) { return db.prepare('DELETE FROM products WHERE id=?').run(String(productId)).changes > 0; },
     },
