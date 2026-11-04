@@ -172,5 +172,19 @@ await readConversation(store, { readMessages: async value => { keys = value; } }
 assert.deepEqual(keys.map(key => key.id), ['in2'], 'a read receipt only goes out through the number that received it');
 store.close();
 
+// A database already migrated by the interim build opens and keeps working
+const interimPath = join(root, 'interim.sqlite');
+const interim = new DatabaseSync(interimPath);
+interim.exec("CREATE TABLE messages (id TEXT PRIMARY KEY, jid TEXT NOT NULL, name TEXT NOT NULL, text TEXT NOT NULL, outgoing INTEGER NOT NULL, timestamp INTEGER NOT NULL, instance_id TEXT NOT NULL DEFAULT 'default', wa_id TEXT NOT NULL DEFAULT ''); INSERT INTO messages (id,jid,name,text,outgoing,timestamp,instance_id) VALUES ('a','628@s.whatsapp.net','A','x',0,1,'n5'); CREATE TABLE conversation_state (jid TEXT NOT NULL, instance_id TEXT NOT NULL DEFAULT 'default', force_unread INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(jid,instance_id)); INSERT INTO conversation_state VALUES ('628@s.whatsapp.net','default',0),('628@s.whatsapp.net','n5',1)");
+interim.close();
+const migrated = openMessages(interimPath);
+assert.equal(migrated.byId('a').instance, 'n5');
+assert.equal(migrated.list()[0].unreadCount, 1);
+migrated.markRead(jid, ['a']);
+migrated.markUnread(jid);
+migrated.add({ id: 'b', jid, text: 'y', timestamp: 2 });
+migrated.close();
+openMessages(interimPath).close();
+
 await rm(root, { recursive: true, force: true });
 console.log('wa-numbers test ok');

@@ -13,7 +13,19 @@ export function openMessages(path) {
     CREATE TABLE IF NOT EXISTS inbox_meta (key TEXT PRIMARY KEY);`);
   const columns = new Set(db.prepare('PRAGMA table_info(messages)').all().map(row => row.name));
   for (const column of ['read_at', 'receipt_sent_at']) if (!columns.has(column)) db.exec(`ALTER TABLE messages ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
-  if (!columns.has('instance')) db.exec("ALTER TABLE messages ADD COLUMN instance TEXT NOT NULL DEFAULT 'default'");
+  if (!columns.has('instance')) {
+    db.exec("ALTER TABLE messages ADD COLUMN instance TEXT NOT NULL DEFAULT 'default'");
+    if (columns.has('instance_id')) db.exec('UPDATE messages SET instance=instance_id');
+  }
+  // An interim build keyed this table by number as well; a customer has one unread state here.
+  if (db.prepare('PRAGMA table_info(conversation_state)').all().some(row => row.name === 'instance_id')) {
+    db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE conversation_state_next (jid TEXT PRIMARY KEY, force_unread INTEGER NOT NULL DEFAULT 0);
+      INSERT INTO conversation_state_next SELECT jid,MAX(force_unread) FROM conversation_state GROUP BY jid;
+      DROP TABLE conversation_state;
+      ALTER TABLE conversation_state_next RENAME TO conversation_state;
+      COMMIT;`);
+  }
   if (!db.prepare('SELECT 1 FROM inbox_meta WHERE key=?').get('labels-seeded')) {
     db.exec('BEGIN IMMEDIATE');
     try {
