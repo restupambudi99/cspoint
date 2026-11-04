@@ -4,6 +4,13 @@ import { rankKnowledge } from './pdf-knowledge.mjs';
 import { normalizeWaPhone } from './phone.mjs';
 
 const now = () => Date.now();
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ORDER_STATUSES = ['Menunggu Bayar', 'Diproses', 'Selesai'];
+const invalid = message => Object.assign(new Error(message), { status: 400 });
+const orderStatus = value => {
+  if (!ORDER_STATUSES.includes(value)) throw invalid('Status pesanan tidak valid.');
+  return value;
+};
 const id = () => randomUUID();
 
 export function openStore(path) {
@@ -62,8 +69,8 @@ export function openStore(path) {
         rotation: ['Round Robin (Bergantian)', 'Random (Acak)'].includes(patch.rotation) ? patch.rotation : current.rotation,
         couriers: Array.isArray(patch.couriers) ? patch.couriers.map(value => text(value, 40)).filter(Boolean).slice(0, 20) : current.couriers,
         scheduleEnabled: patch.scheduleEnabled === undefined ? Boolean(current.scheduleEnabled) : Boolean(patch.scheduleEnabled),
-        scheduleStart: /^\d{2}:\d{2}$/.test(patch.scheduleStart || '') ? patch.scheduleStart : (current.scheduleStart || '08:00'),
-        scheduleEnd: /^\d{2}:\d{2}$/.test(patch.scheduleEnd || '') ? patch.scheduleEnd : (current.scheduleEnd || '21:00'),
+        scheduleStart: patch.scheduleStart === undefined ? current.scheduleStart : patch.scheduleStart,
+        scheduleEnd: patch.scheduleEnd === undefined ? current.scheduleEnd : patch.scheduleEnd,
         dailyLimit: Math.max(0, int(patch.dailyLimit, current.dailyLimit)),
         sendMode: ['Aman (bertahap)', 'Normal'].includes(patch.sendMode) ? patch.sendMode : (current.sendMode || 'Aman (bertahap)'),
         autoReply: patch.autoReply === undefined ? Boolean(current.autoReply) : Boolean(patch.autoReply),
@@ -74,7 +81,8 @@ export function openStore(path) {
         shippingPdfSize: patch.shippingPdfSize === undefined ? current.shippingPdfSize : Math.max(0, int(patch.shippingPdfSize)),
         manualShippingPriority: patch.manualShippingPriority === undefined ? current.manualShippingPriority !== false : Boolean(patch.manualShippingPriority),
       };
-      if (next.maxInterval < next.minInterval) next.maxInterval = next.minInterval;
+      if (next.maxInterval < next.minInterval) throw invalid('Interval minimum tidak boleh melebihi maksimum.');
+      if (!TIME.test(next.scheduleStart) || !TIME.test(next.scheduleEnd) || next.scheduleStart >= next.scheduleEnd) throw invalid('Jam mulai harus lebih awal dari jam selesai.');
       if (next.shippingPdfContent && Buffer.byteLength(next.shippingPdfContent, 'base64') > 1000000) throw Object.assign(new Error('Ukuran PDF ongkir melebihi batas 1.000.000 byte'), { status: 413 });
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
       for (const [key, value] of Object.entries(next)) { if (value === undefined) continue; statement.run(key, key === 'couriers' ? JSON.stringify(value) : String(value)); }
@@ -102,9 +110,13 @@ export function openStore(path) {
       create(input = {}) {
         const customer = text(input.customer, 120);
         if (!customer) throw Object.assign(new Error('Nama pelanggan wajib diisi'), { status: 400 });
-        const row = { id: id(), customer, phone: phone(input.phone), status: text(input.status, 40) || 'Menunggu Bayar', total: Math.max(0, int(input.total)), note: text(input.note, 2000), created_at: now() };
+        const row = { id: id(), customer, phone: phone(input.phone), status: orderStatus(input.status || 'Menunggu Bayar'), total: Math.max(0, int(input.total)), note: text(input.note, 2000), created_at: now() };
         db.prepare('INSERT INTO orders VALUES (?,?,?,?,?,?,?)').run(row.id, row.customer, row.phone, row.status, row.total, row.note, row.created_at);
         return row;
+      },
+      update(orderId, input = {}) {
+        db.prepare('UPDATE orders SET status=? WHERE id=?').run(orderStatus(input.status), String(orderId));
+        return db.prepare('SELECT * FROM orders WHERE id=?').get(String(orderId)) ?? null;
       },
       remove(orderId) { return db.prepare('DELETE FROM orders WHERE id=?').run(String(orderId)).changes > 0; },
     },
@@ -161,6 +173,12 @@ export function openStore(path) {
         db.prepare('INSERT INTO contacts VALUES (?,?,?,?,?)').run(row.id, row.name, row.phone, row.tag, row.created_at);
         return row;
       },
+      update(contactId, input = {}) {
+        const name = text(input.name, 120);
+        if (!name) throw invalid('Nama kontak wajib diisi');
+        db.prepare('UPDATE contacts SET name=?, phone=?, tag=? WHERE id=?').run(name, phone(input.phone), text(input.tag, 40), String(contactId));
+        return db.prepare('SELECT * FROM contacts WHERE id=?').get(String(contactId)) ?? null;
+      },
       remove(contactId) { return db.prepare('DELETE FROM contacts WHERE id=?').run(String(contactId)).changes > 0; },
     },
 
@@ -170,6 +188,12 @@ export function openStore(path) {
         const name = text(input.name, 120);
         if (!name) throw Object.assign(new Error('Nama template wajib diisi'), { status: 400 });
         const row = { id: id(), name, body: text(input.body, 4000), stage: text(input.stage, 40), created_at: now() };
+        // One template per stage: overwrite the newest row. Older duplicates stay untouched.
+        const existing = row.stage && db.prepare('SELECT id, created_at FROM templates WHERE stage=? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(row.stage);
+        if (existing) {
+          db.prepare('UPDATE templates SET name=?, body=? WHERE id=?').run(row.name, row.body, existing.id);
+          return { ...row, id: existing.id, created_at: existing.created_at };
+        }
         db.prepare('INSERT INTO templates VALUES (?,?,?,?,?)').run(row.id, row.name, row.body, row.stage, row.created_at);
         return row;
       },

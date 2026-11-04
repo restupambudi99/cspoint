@@ -414,6 +414,11 @@ const server = createServer(async (req, res) => {
         if (!removed) { send(res, 404, { error: 'Data tidak ditemukan' }); return; }
         send(res, 200, { deleted: true }); return;
       }
+      if (method === 'PATCH' && item && store[name].update) {
+        const updated = store[name].update(item[1], await readJson(req, 100000));
+        if (!updated) { send(res, 404, { error: 'Data tidak ditemukan' }); return; }
+        send(res, 200, updated); return;
+      }
     }
 
     send(res, 404, { error: 'Not found' });

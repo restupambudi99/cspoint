@@ -77,7 +77,7 @@ try {
   result = await json('/settings', { method: 'POST', body: JSON.stringify({ shippingPdfContent: 'x'.repeat(12000001) }) });
   assert.equal(result.code, 413);
   result = await json('/settings', { method: 'POST', body: JSON.stringify({ minInterval: 5, maxInterval: 1 }) });
-  assert.equal(result.body.maxInterval, 5, 'maxInterval must not drop below minInterval');
+  assert.equal(result.code, 400, 'minInterval above maxInterval is rejected, not silently changed');
 
   // Product create/list/delete against the real store.
   result = await json('/products', { method: 'POST', body: JSON.stringify({ name: 'Kaos Polos', sku: 'KP-01', price: 50000, stock: 7 }) });
