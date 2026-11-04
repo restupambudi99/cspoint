@@ -23,7 +23,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         }
         if (!text && (!connection.isCurrent() || !allowed())) { config.deferReply(message.id); return; }
         const usedFallback = !text;
-        text ||= 'Baik kak, pesan dan detail yang kakak kirim sudah saya terima. Saya bantu pastikan harga produk dan ongkirnya agar totalnya tepat. Jika ada data yang belum tercantum, boleh kirim nama produk/varian, jumlah, serta alamat lengkapnya ya.';
+        text ||= 'Baik kak, saya bantu cek dan lanjutkan pesanan ya. Saya perlu memastikan harga produk dan ongkirnya dulu agar totalnya tepat, jadi tidak akan menebak. Detail yang sudah dikirim tetap saya jadikan acuan; jika belum menyebut nama, alamat lengkap, atau jumlah, boleh kirimkan di sini.';
         // The interval limits closely spaced sends; it must not add a fixed delay to the first reply.
         if (lastSentAt) {
           const seconds = settings.minInterval + Math.random() * (settings.maxInterval - settings.minInterval);

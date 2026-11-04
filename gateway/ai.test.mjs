@@ -69,7 +69,7 @@ try {
   const prompt = buildAiMessages({ assistantName: 'CSPoint', instructions: 'Jawab ramah.' }, [{ text: 'Halo', outgoing: false }]);
   assert.match(await router.complete(prompt), /CSPoint/);
   assert.equal(lastPayload.model, 'Fallback');
-  assert.equal(lastPayload.max_tokens, 320);
+  assert.equal(lastPayload.max_tokens, 1200);
   assert.equal(lastPayload.messages[0].role, 'system');
   assert.equal(lastPayload.messages.at(-1).role, 'user');
   reject = true;
@@ -102,7 +102,7 @@ try {
   assert.deepEqual(reads, [inbound.id], 'enabled AI acknowledges the incoming message before replying');
   assert.equal(delays.length, 0, 'first reply has no artificial interval delay');
   assert.match(lastPayload.messages[0].content, /Bubon \/ Aceh Barat → Rp40\.000/, 'shipping PDF tariff is included in the AI context');
-  assert.match(lastPayload.messages[0].content, /Terus bantu calon pelanggan sampai pesanan siap dikonfirmasi/);
+  assert.match(lastPayload.messages[0].content, /Arahkan closing/);
   assert.equal(messages.thread(inbound.jid).at(-1).outgoing, 1);
   const afterReply = calls;
   await reply(inbound, connection);
@@ -149,13 +149,13 @@ try {
     sleep: async () => {}, onError: error => { fallbackFailure = error; }, now: () => simulatedNow,
   });
   await fallbackReply({ ...inbound, id: 'in-7' }, { isCurrent: () => true, send: async (_jid, payload) => { fallbackSent = payload.text; return { key: { id: 'out-fallback' } }; } });
-  assert.match(fallbackSent, /pesan dan detail.*sudah saya terima/i, 'a model outage still gets a helpful WhatsApp reply');
+  assert.match(fallbackSent, /saya bantu cek dan lanjutkan pesanan/i, 'a model outage still gets a helpful WhatsApp reply');
   assert.equal(fallbackFailure.fallbackSent, true, 'fallback delivery is visible in gateway health');
 
-  const longInstruction = `Instruksi panjang ${'Aturan toko yang sudah disetujui. '.repeat(300)}`;
+  const longInstruction = `Panduan layanan pelanggan\n${'Aturan toko yang sudah disetujui.\n'.repeat(300)}\nJika pelanggan bertanya total Paket 3, jangan mengarang; pastikan harga dan jumlah.\n`;
   const contextMessages = buildAiMessages({ assistantName: 'CSPoint', instructions: longInstruction }, [{ text: 'Saya pesan Paket 3, 50 pcs. Total berapa?', outgoing: false }], Array.from({ length: 8 }, (_, index) => ({ name: index === 7 ? 'Paket 3' : `Barang ${index}`, sku: '', description: 'produk', price: 10000 + index, stock: 1 })), Array.from({ length: 5 }, (_, index) => ({ name: `Referensi ${index}`, content: 'tarif'.repeat(500) })));
-  assert.ok(contextMessages[0].content.includes(longInstruction), 'long admin instructions remain intact');
-  assert.ok(contextMessages[0].content.length < longInstruction.length + 7000, 'catalog and PDF context are kept compact');
+  assert.ok(contextMessages[0].content.includes('Jika pelanggan bertanya total Paket 3'), 'relevant instructions are retrieved even when they are at the end');
+  assert.ok(contextMessages[0].content.length < 7000, 'catalog, PDF and relevant admin context fit the model window');
   assert.match(contextMessages[0].content, /"name":"Paket 3"/, 'catalog context prioritizes the product named in the order');
   console.log('PASS: encrypted key persistence/redaction, 9Router auth/models/completions, uncapped replies, schedule independence, history, retries, reconnect cancellation and sales context');
 } finally {

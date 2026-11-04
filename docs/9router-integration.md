@@ -30,7 +30,7 @@ gagal tetapi WhatsApp tersedia, pelanggan menerima balasan bantuan singkat.
 Kedua toggle dan koneksi tetap harus aktif; jeda kirim mengikuti Pengaturan.
 
 Konteks AI mencakup instruksi admin penuh, hingga delapan pesan terakhir,
-maksimal dua kutipan Knowledge yang paling relevan, dan maksimal lima produk
+kutipan Knowledge yang paling relevan, dan maksimal dua produk
 yang cocok dengan percakapan. Balasan diarahkan mengumpulkan nama, alamat,
 produk/varian, jumlah, dan menghitung total hanya dari harga serta ongkir yang
 tersimpan; data yang tidak ada harus dikonfirmasi, tidak boleh dikarang.
