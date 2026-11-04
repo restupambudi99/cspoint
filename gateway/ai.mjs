@@ -64,7 +64,7 @@ export function openAiConfig(path, secret) {
     claimReply(messageId, day, limit) {
       db.exec('BEGIN IMMEDIATE');
       try {
-        const count = limit === 0 ? 0 : db.prepare('SELECT count(*) AS count FROM ai_reply_claims WHERE day=?').get(day).count;
+        const count = limit === 0 ? 0 : db.prepare("SELECT count(*) AS count FROM ai_reply_claims WHERE day=? AND status<>'pending'").get(day).count;
         const claimed = (limit === 0 || count < limit) && (db.prepare("INSERT OR IGNORE INTO ai_reply_claims (message_id,day,status) VALUES (?,?, 'processing')").run(messageId, day).changes > 0
           || db.prepare("UPDATE ai_reply_claims SET status='processing' WHERE message_id=? AND status='pending'").run(messageId).changes > 0);
         db.exec('COMMIT');

@@ -1,8 +1,16 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { rankKnowledge } from './pdf-knowledge.mjs';
+import { normalizeWaPhone } from './phone.mjs';
 
 const now = () => Date.now();
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ORDER_STATUSES = ['Menunggu Bayar', 'Diproses', 'Selesai'];
+const invalid = message => Object.assign(new Error(message), { status: 400 });
+const orderStatus = value => {
+  if (!ORDER_STATUSES.includes(value)) throw invalid('Status pesanan tidak valid.');
+  return value;
+};
 const id = () => randomUUID();
 
 export function openStore(path) {
@@ -15,14 +23,17 @@ export function openStore(path) {
     CREATE TABLE IF NOT EXISTS forms (id TEXT PRIMARY KEY, name TEXT NOT NULL, fields TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS knowledge (id TEXT PRIMARY KEY, name TEXT NOT NULL, content TEXT NOT NULL, mime TEXT NOT NULL DEFAULT 'text/plain', status TEXT NOT NULL DEFAULT 'siap', created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS agents (instance TEXT PRIMARY KEY, assistant_name TEXT NOT NULL DEFAULT 'Kak', instructions TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS whatsapp_instances (id TEXT PRIMARY KEY, label TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS contacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', tag TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', stage TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
   `);
-  db.prepare('INSERT OR IGNORE INTO whatsapp_instances (id,label,enabled,created_at) VALUES (?,?,1,?)').run('default', 'Nomor utama', now());
   const knowledgeColumns = new Set(db.prepare('PRAGMA table_info(knowledge)').all().map(column => column.name));
   if (!knowledgeColumns.has('source_content')) db.exec("ALTER TABLE knowledge ADD COLUMN source_content TEXT NOT NULL DEFAULT ''");
-  const phone = value => String(value ?? '').replace(/\D/g, '').replace(/^0/, '62').slice(0, 15);
+  const phone = value => {
+    if (!String(value ?? '').trim()) return '';
+    const normalized = normalizeWaPhone(value);
+    if (!normalized) throw Object.assign(new Error('Nomor WhatsApp tidak valid. Gunakan format 08xxx atau 628xxx.'), { status: 400 });
+    return normalized;
+  };
 
   const text = (value, max) => String(value ?? '').trim().slice(0, max);
   const int = (value, fallback = 0) => {
@@ -31,20 +42,6 @@ export function openStore(path) {
   };
 
   return {
-    instances: {
-      list: () => db.prepare('SELECT id,label,enabled,created_at FROM whatsapp_instances ORDER BY created_at,id').all().map(row => ({ ...row, enabled: Boolean(row.enabled) })),
-      create(label) {
-        const clean = text(label, 60);
-        if (!clean) throw Object.assign(new Error('Nama nomor wajib diisi.'), { status: 400 });
-        if (db.prepare('SELECT count(*) AS total FROM whatsapp_instances').get().total >= 10) throw Object.assign(new Error('Maksimal 10 nomor WhatsApp.'), { status: 409 });
-        const row = { id: id(), label: clean, enabled: 1, created_at: now() };
-        db.prepare('INSERT INTO whatsapp_instances VALUES (?,?,?,?)').run(row.id, row.label, row.enabled, row.created_at);
-        return { ...row, enabled: true };
-      },
-      setEnabled(instanceId, enabled) { return db.prepare('UPDATE whatsapp_instances SET enabled=? WHERE id=?').run(enabled ? 1 : 0, String(instanceId)).changes > 0; },
-      remove(instanceId) { if (instanceId === 'default') return false; return db.prepare('DELETE FROM whatsapp_instances WHERE id=?').run(String(instanceId)).changes > 0; },
-      has(instanceId) { return Boolean(db.prepare('SELECT 1 FROM whatsapp_instances WHERE id=?').get(String(instanceId))); },
-    },
     settings() {
       const stored = Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(row => [row.key, row.value]));
       return {
@@ -72,8 +69,8 @@ export function openStore(path) {
         rotation: ['Round Robin (Bergantian)', 'Random (Acak)'].includes(patch.rotation) ? patch.rotation : current.rotation,
         couriers: Array.isArray(patch.couriers) ? patch.couriers.map(value => text(value, 40)).filter(Boolean).slice(0, 20) : current.couriers,
         scheduleEnabled: patch.scheduleEnabled === undefined ? Boolean(current.scheduleEnabled) : Boolean(patch.scheduleEnabled),
-        scheduleStart: /^\d{2}:\d{2}$/.test(patch.scheduleStart || '') ? patch.scheduleStart : (current.scheduleStart || '08:00'),
-        scheduleEnd: /^\d{2}:\d{2}$/.test(patch.scheduleEnd || '') ? patch.scheduleEnd : (current.scheduleEnd || '21:00'),
+        scheduleStart: patch.scheduleStart === undefined ? current.scheduleStart : patch.scheduleStart,
+        scheduleEnd: patch.scheduleEnd === undefined ? current.scheduleEnd : patch.scheduleEnd,
         dailyLimit: Math.max(0, int(patch.dailyLimit, current.dailyLimit)),
         sendMode: ['Aman (bertahap)', 'Normal'].includes(patch.sendMode) ? patch.sendMode : (current.sendMode || 'Aman (bertahap)'),
         autoReply: patch.autoReply === undefined ? Boolean(current.autoReply) : Boolean(patch.autoReply),
@@ -84,7 +81,8 @@ export function openStore(path) {
         shippingPdfSize: patch.shippingPdfSize === undefined ? current.shippingPdfSize : Math.max(0, int(patch.shippingPdfSize)),
         manualShippingPriority: patch.manualShippingPriority === undefined ? current.manualShippingPriority !== false : Boolean(patch.manualShippingPriority),
       };
-      if (next.maxInterval < next.minInterval) next.maxInterval = next.minInterval;
+      if (next.maxInterval < next.minInterval) throw invalid('Interval minimum tidak boleh melebihi maksimum.');
+      if (!TIME.test(next.scheduleStart) || !TIME.test(next.scheduleEnd) || next.scheduleStart >= next.scheduleEnd) throw invalid('Jam mulai harus lebih awal dari jam selesai.');
       if (next.shippingPdfContent && Buffer.byteLength(next.shippingPdfContent, 'base64') > 1000000) throw Object.assign(new Error('Ukuran PDF ongkir melebihi batas 1.000.000 byte'), { status: 413 });
       const statement = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
       for (const [key, value] of Object.entries(next)) { if (value === undefined) continue; statement.run(key, key === 'couriers' ? JSON.stringify(value) : String(value)); }
@@ -112,9 +110,13 @@ export function openStore(path) {
       create(input = {}) {
         const customer = text(input.customer, 120);
         if (!customer) throw Object.assign(new Error('Nama pelanggan wajib diisi'), { status: 400 });
-        const row = { id: id(), customer, phone: text(input.phone, 20), status: text(input.status, 40) || 'Menunggu Bayar', total: Math.max(0, int(input.total)), note: text(input.note, 2000), created_at: now() };
+        const row = { id: id(), customer, phone: phone(input.phone), status: orderStatus(input.status || 'Menunggu Bayar'), total: Math.max(0, int(input.total)), note: text(input.note, 2000), created_at: now() };
         db.prepare('INSERT INTO orders VALUES (?,?,?,?,?,?,?)').run(row.id, row.customer, row.phone, row.status, row.total, row.note, row.created_at);
         return row;
+      },
+      update(orderId, input = {}) {
+        db.prepare('UPDATE orders SET status=? WHERE id=?').run(orderStatus(input.status), String(orderId));
+        return db.prepare('SELECT * FROM orders WHERE id=?').get(String(orderId)) ?? null;
       },
       remove(orderId) { return db.prepare('DELETE FROM orders WHERE id=?').run(String(orderId)).changes > 0; },
     },
@@ -135,7 +137,7 @@ export function openStore(path) {
     knowledge: {
       list: () => db.prepare('SELECT id, name, mime, status, created_at, length(content) AS size FROM knowledge ORDER BY created_at DESC LIMIT 200').all(),
       relevant(query) {
-        const shipping = db.prepare("SELECT (SELECT value FROM settings WHERE key='shippingPdfName') AS name, value AS content FROM settings WHERE key='shippingPdfText'").get();
+        const shipping = db.prepare("SELECT (SELECT value FROM settings WHERE key='shippingPdfName') AS name, value AS content FROM settings WHERE key='shippingPdfText' AND COALESCE((SELECT value FROM settings WHERE key='manualShippingPriority'),'true')<>'false'").get();
         const documents = [
           ...(shipping?.content ? [{ name: shipping.name || 'Tarif Ongkir Manual PDF', content: shipping.content }] : []),
           ...db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all(),
@@ -171,6 +173,12 @@ export function openStore(path) {
         db.prepare('INSERT INTO contacts VALUES (?,?,?,?,?)').run(row.id, row.name, row.phone, row.tag, row.created_at);
         return row;
       },
+      update(contactId, input = {}) {
+        const name = text(input.name, 120);
+        if (!name) throw invalid('Nama kontak wajib diisi');
+        db.prepare('UPDATE contacts SET name=?, phone=?, tag=? WHERE id=?').run(name, phone(input.phone), text(input.tag, 40), String(contactId));
+        return db.prepare('SELECT * FROM contacts WHERE id=?').get(String(contactId)) ?? null;
+      },
       remove(contactId) { return db.prepare('DELETE FROM contacts WHERE id=?').run(String(contactId)).changes > 0; },
     },
 
@@ -180,6 +188,12 @@ export function openStore(path) {
         const name = text(input.name, 120);
         if (!name) throw Object.assign(new Error('Nama template wajib diisi'), { status: 400 });
         const row = { id: id(), name, body: text(input.body, 4000), stage: text(input.stage, 40), created_at: now() };
+        // One template per stage: overwrite the newest row. Older duplicates stay untouched.
+        const existing = row.stage && db.prepare('SELECT id, created_at FROM templates WHERE stage=? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(row.stage);
+        if (existing) {
+          db.prepare('UPDATE templates SET name=?, body=? WHERE id=?').run(row.name, row.body, existing.id);
+          return { ...row, id: existing.id, created_at: existing.created_at };
+        }
         db.prepare('INSERT INTO templates VALUES (?,?,?,?,?)').run(row.id, row.name, row.body, row.stage, row.created_at);
         return row;
       },

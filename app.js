@@ -11,6 +11,7 @@ async function api(path, options = {}) {
     headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) },
   });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) location.href = '/login';
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
   return data;
 }
@@ -18,6 +19,13 @@ const post = body => ({ method: 'POST', body: JSON.stringify(body) });
 const MAX_KNOWLEDGE_PDF_CHARS = 500000;
 const MAX_KNOWLEDGE_PDF_BYTES = 8 * 1024 * 1024;
 const MAX_SHIPPING_PDF_BYTES = 1000000;
+const INVALID_PHONE = 'Nomor WhatsApp tidak valid. Gunakan format 08xxx atau 628xxx.';
+// Same rule as normalizeWaPhone in store.mjs.
+function normalizePhone(value) {
+  const digits = String(value ?? '').replace(/\D/g, '').replace(/^0/, '62').replace(/^8/, '628');
+  return /^628\d{7,11}$/.test(digits) ? digits : '';
+}
+const priceText = value => (value !== '' && Number.isFinite(Number(value)) ? `Rp ${Number(value).toLocaleString('id-ID')}` : String(value));
 
 function notify(element, message, kind = 'info') {
   if (!element) return;
@@ -33,21 +41,20 @@ function section(heading, intro, body, action = '') {
 
 function settingsPage() {
   content.innerHTML = [
-    section('Nomor WhatsApp (Instance)', 'Kelola sampai 10 nomor. Setiap nomor memiliki sesi dan QR tersendiri.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat nomor WhatsApp…</p></div>'),
-    section('Pengaturan Interval', 'Jeda antar pesan otomatis. Disimpan di database server.', `
+    section('Nomor WhatsApp (Instance)', 'Hubungkan hingga 10 nomor. Semua nomor memakai AI Agent, jadwal, interval, dan batas harian yang sama.', '<div id="wa-pairing" class="pairing"><p class="empty">Memuat status koneksi…</p></div>'),
+    section('Pengaturan Interval', 'Jeda antar balasan AI otomatis. Disimpan di database server.', `
       <div class="form-grid">
         <label class="field">Minimum (detik)<input id="set-min" type="number" min="1" max="600" value="2"></label>
         <label class="field">Maksimum (detik)<input id="set-max" type="number" min="1" max="600" value="5"></label>
-        <label class="field">Rotasi<select id="set-rotation"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select></label>
+        <label class="field">Rotasi<select id="set-rotation" disabled title="Belum tersedia"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select><span class="hint">Belum tersedia.</span></label>
       </div>
       <div class="section-actions"><button class="button" data-save-settings>Simpan Pengaturan</button><p role="status" id="settings-result" class="hint"></p></div>`),
-    section('Waktu Operasional', 'Pesan otomatis hanya dikirim pada waktu yang Anda tentukan.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan batas waktu</strong><span>Batasi pengiriman pesan di luar jam kerja.</span></div><label class="switch"><input id="set-schedule-enabled" type="checkbox"><span class="track"></span></label></div><div class="form-grid schedule-fields"><label class="field">Mulai<input id="set-schedule-start" type="time" value="08:00"></label><label class="field">Selesai<input id="set-schedule-end" type="time" value="21:00"></label></div>`),
-    section('Ekspedisi Cek Ongkir', 'Ekspedisi yang dipakai saat menghitung ongkir.', `
-      <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}">${esc(name)}</label>`).join('')}</div>
-      <div class="section-actions"><button class="button" data-save-shipping>Simpan Ekspedisi</button><p role="status" id="shipping-result" class="hint"></p></div>`),
-    section('Ongkir Manual dari PDF', 'Unggah daftar tarif per kecamatan untuk dipakai sebagai sumber perhitungan.', `<div class="manual-shipping-card"><div class="switch-row manual-priority"><div class="switch-copy"><strong>Prioritaskan tarif manual</strong><span>Jika kecamatan pembeli ada di daftar, AI memakai tarif ini. Jika tidak ada, tetap cek RajaOngkir.</span></div><label class="switch"><input id="set-manual-shipping-priority" type="checkbox"><span class="track"></span></label></div><label class="field full">File tarif ongkir PDF<input id="shipping-pdf" type="file" accept="application/pdf,.pdf"><span class="hint">Format: Kecamatan / Kabupaten → tarif. Maksimal ${MAX_SHIPPING_PDF_BYTES.toLocaleString('id-ID')} byte (sekitar 1 MB).</span></label><p id="shipping-pdf-current" class="shipping-pdf-current">Belum ada PDF ongkir tersimpan.</p><div class="section-actions"><button class="button" data-save-shipping-pdf>Simpan PDF Ongkir</button><p role="status" id="shipping-pdf-result" class="hint"></p></div></div>`),
-    section('Pesan Masuk', 'Atur perilaku saat pesan pelanggan masuk.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan balasan otomatis</strong><span>AI Agent akan merespons pesan ketika konfigurasi sudah aktif.</span></div><label class="switch"><input id="set-auto-reply" type="checkbox"><span class="track"></span></label></div><div class="switch-row"><div class="switch-copy"><strong>Simpan riwayat pesan</strong><span>Pesan disimpan untuk Kotak Masuk dan analitik.</span></div><label class="switch"><input id="set-save-history" type="checkbox" checked><span class="track"></span></label></div><div class="section-actions"><button class="button" data-save-inbox>Simpan Pengaturan</button><p role="status" id="inbox-result" class="hint"></p></div>`),
-    section('Pengaturan Pengiriman', 'Atur batas dan perilaku pengiriman pesan massal.', `<div class="form-grid"><label class="field">Batas pesan per hari<input id="set-daily-limit" type="number" min="0" value="100"></label><label class="field">Mode pengiriman<select id="set-send-mode"><option>Aman (bertahap)</option><option>Normal</option></select></label></div><p class="hint">Gunakan interval acak dan batas harian untuk menjaga kualitas pengiriman WhatsApp.</p>`),
+    section('Waktu Operasional', 'Pesan otomatis hanya dikirim pada waktu yang Anda tentukan.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan batas waktu</strong><span>AI tidak membalas di luar jam ini (WIB). Pesan tetap masuk Kotak Masuk.</span></div><label class="switch"><input id="set-schedule-enabled" type="checkbox"><span class="track"></span></label></div><div class="form-grid schedule-fields"><label class="field">Mulai<input id="set-schedule-start" type="time" value="08:00"></label><label class="field">Selesai<input id="set-schedule-end" type="time" value="21:00"></label></div><div class="section-actions"><button class="button" data-save-schedule>Simpan Waktu Operasional</button><p role="status" id="schedule-result" class="hint"></p></div>`),
+    section('Ekspedisi Cek Ongkir', 'Belum tersedia. Integrasi cek ongkir ekspedisi belum ada; AI memakai tarif dari PDF di bawah.', `
+      <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}" disabled title="Belum tersedia">${esc(name)}</label>`).join('')}</div>`),
+    section('Ongkir Manual dari PDF', 'Unggah daftar tarif per kecamatan untuk dipakai sebagai sumber perhitungan.', `<div class="manual-shipping-card"><div class="switch-row manual-priority"><div class="switch-copy"><strong>Prioritaskan tarif manual</strong><span>Jika kecamatan pembeli ada di daftar, AI memakai tarif ini. Jika tidak ada, AI menyampaikan bahwa tarif akan dikonfirmasi admin. Jika dimatikan, PDF ini tidak dipakai AI.</span></div><label class="switch"><input id="set-manual-shipping-priority" type="checkbox"><span class="track"></span></label></div><label class="field full">File tarif ongkir PDF<input id="shipping-pdf" type="file" accept="application/pdf,.pdf"><span class="hint">Format: Kecamatan / Kabupaten → tarif. Maksimal ${MAX_SHIPPING_PDF_BYTES.toLocaleString('id-ID')} byte (sekitar 1 MB).</span></label><p id="shipping-pdf-current" class="shipping-pdf-current">Belum ada PDF ongkir tersimpan.</p><div class="section-actions"><button class="button" data-save-shipping-pdf>Simpan PDF Ongkir</button><p role="status" id="shipping-pdf-result" class="hint"></p></div></div>`),
+    section('Pesan Masuk', 'Atur perilaku saat pesan pelanggan masuk.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan balasan otomatis</strong><span>AI Agent akan merespons pesan ketika konfigurasi sudah aktif.</span></div><label class="switch"><input id="set-auto-reply" type="checkbox"><span class="track"></span></label></div><div class="switch-row"><div class="switch-copy"><strong>Simpan riwayat pesan</strong><span>Pesan disimpan untuk Kotak Masuk. Jika dimatikan, pesan baru tidak disimpan dan tidak muncul di Kotak Masuk.</span></div><label class="switch"><input id="set-save-history" type="checkbox" checked><span class="track"></span></label></div><div class="section-actions"><button class="button" data-save-inbox>Simpan Pengaturan</button><p role="status" id="inbox-result" class="hint"></p></div>`),
+    section('Pengaturan Pengiriman', 'Batas balasan AI otomatis per hari.', `<div class="form-grid"><label class="field">Batas pesan per hari<input id="set-daily-limit" type="number" min="0" step="1" value="0"><span class="hint">0 berarti tanpa batas. Jika tercapai, AI berhenti membalas sampai besok (WIB).</span></label><label class="field">Mode pengiriman<select id="set-send-mode" disabled title="Belum tersedia"><option>Aman (bertahap)</option><option>Normal</option></select><span class="hint">Belum tersedia.</span></label></div><div class="section-actions"><button class="button" data-save-delivery>Simpan Pengiriman</button><p role="status" id="delivery-result" class="hint"></p></div>`),
   ].join('');
   loadSettings();
 }
@@ -64,7 +71,7 @@ async function loadSettings() {
     document.querySelector('#set-schedule-end').value = settings.scheduleEnd || '21:00';
     document.querySelector('#set-auto-reply').checked = Boolean(settings.autoReply);
     document.querySelector('#set-save-history').checked = settings.saveHistory !== false;
-    document.querySelector('#set-daily-limit').value = settings.dailyLimit ?? 100;
+    document.querySelector('#set-daily-limit').value = settings.dailyLimit ?? 0;
     document.querySelector('#set-send-mode').value = settings.sendMode || 'Aman (bertahap)';
     document.querySelector('#set-manual-shipping-priority').checked = settings.manualShippingPriority !== false;
     for (const box of document.querySelectorAll('input[name=courier]')) box.checked = (settings.couriers || []).includes(box.value);
@@ -80,21 +87,23 @@ function dashboardPage() {
   content.innerHTML = [
     `<div class="dashboard-welcome"><div><h2>Ruang kerja CSPoint</h2><p>Kelola pesan WhatsApp dan aktivitas pelanggan dari satu tempat.</p></div><a class="button" href="#inbox">Buka Kotak Masuk</a></div>`,
     `<section class="stats">
-      <div class="stat stat-primary"><span>Total percakapan</span><strong id="stat-total">–</strong><small>Riwayat tersimpan</small></div>
-      <div class="stat"><span>Pesan terkirim</span><strong id="stat-sent">–</strong><small>Dari dashboard</small></div>
+      <div class="stat stat-primary"><span>Total percakapan</span><strong id="stat-total">–</strong><small>200 percakapan terbaru</small></div>
+      <div class="stat"><span>Sudah dibalas</span><strong id="stat-sent">–</strong><small>Pesan terakhir dari kita</small></div>
       <div class="stat"><span>Status WhatsApp</span><strong id="stat-status">–</strong><small>Pembaruan langsung</small></div>
     </section>`,
     `<div class="dashboard-grid">${section('Kirim Pesan', 'Pesan dikirim lewat nomor WhatsApp yang tertaut.', `
+      <label class="field">Kirim dari<select id="send-number"><option value="">Nomor terhubung pertama</option></select></label>
       <label class="field">Nomor WhatsApp<input id="phone" type="tel" placeholder="08xxx atau 628xxx"></label>
       <label class="field">Pesan<textarea id="message" rows="5" maxlength="4000" placeholder="Tulis pesan untuk pelanggan…"></textarea></label>
       <div class="section-actions"><button class="button" data-send-message>Kirim Pesan</button><p role="status" id="send-result" class="hint"></p></div>`)}<section class="section recent-panel"><div class="section-head"><div><h2>Aktivitas terbaru</h2><p class="intro">Percakapan terakhir yang masuk.</p></div><a class="text-link" href="#inbox">Lihat semua</a></div><div id="recent-list" class="recent-list"><p class="empty compact">Memuat aktivitas…</p></div></section></div>`,
   ].join('');
-  api('status').then(result => { document.querySelector('#stat-status').textContent = result.status; }).catch(() => {});
+  api('numbers').then(({ numbers }) => { const select = document.querySelector('#send-number'); if (select) select.insertAdjacentHTML('beforeend', numbers.filter(item => item.status === 'connected').map(item => `<option value="${esc(item.id)}">${esc(item.label)} (${esc(item.phone)})</option>`).join('')); }).catch(() => {});
+  api('status').then(result => { document.querySelector('#stat-status').textContent = result.status; }).catch(() => { const el = document.querySelector('#stat-status'); if (el) el.textContent = 'Gagal dimuat'; });
   api('conversations').then(items => {
-    document.querySelector('#stat-total').textContent = items.length;
+    document.querySelector('#stat-total').textContent = items.length >= 200 ? '200+' : items.length;
     document.querySelector('#stat-sent').textContent = items.filter(item => item.outgoing).length;
     document.querySelector('#recent-list').innerHTML = items.slice(0, 5).map(item => `<a class="recent-row" href="#inbox"><span class="conversation-avatar">${esc((item.name || item.jid).slice(0, 1).toUpperCase())}</span><span><strong>${esc(item.name || item.jid.split('@')[0])}</strong><small>${esc(item.text || 'Belum ada pesan')}</small></span><time>${esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))}</time></a>`).join('') || '<p class="empty compact"><strong>Belum ada aktivitas</strong><span>Pesan terbaru akan muncul di sini.</span></p>';
-  }).catch(() => {});
+  }).catch(error => { const el = document.querySelector('#recent-list'); if (el) el.innerHTML = `<p class="empty compact">Gagal memuat aktivitas: ${esc(error.message)}</p>`; });
 }
 
 /* ------------------------------------------------------------------ AI Agent */
@@ -133,7 +142,7 @@ async function drawAgent() {
         <label class="check"><input id="agent-enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Aktifkan AI Agent</label>
       </div>
       <div class="section-actions"><button class="button" data-save-agent>Simpan Agent</button><p role="status" id="agent-result" class="hint"></p></div>
-      <p class="hint">Balasan otomatis memakai instruksi, Knowledge PDF, dan memori ringkas hingga 12 pesan terakhir per percakapan. AI memakai konteks tersimpan, bukan melatih model; data lama membantu jawaban nyambung dan tidak menanyakan ulang hal yang sudah dijawab. AI Agent memerlukan koneksi 9Router, AI Agent aktif, dan mode AI aktif di Kotak Masuk.</p>`;
+      <p class="hint">Balasan otomatis memakai instruksi, Knowledge PDF, serta memori ringkas hingga 12 pesan terakhir per pelanggan. AI memakai konteks tersimpan, bukan melatih model. Memori mengikuti pengaturan Simpan riwayat pesan agar AI bisa mengingat detail lama dan tidak menanyakannya ulang.</p>`;
   } catch (error) {
     panel.innerHTML = `<p class="empty">Gagal memuat agent: ${esc(error.message)}</p>`;
   }
@@ -168,7 +177,7 @@ function livePanel() {
 const domainConfig = {
   products: { label: 'Produk', intro: 'Katalog persisten untuk AI Agent dan pesanan.', fields: [{ key: 'name', label: 'Nama produk', required: true }, { key: 'sku', label: 'SKU' }, { key: 'price', label: 'Harga', type: 'number' }, { key: 'stock', label: 'Stok', type: 'number' }] },
   orders: { label: 'Pesanan', intro: 'Simpan dan lacak pesanan pelanggan.', fields: [{ key: 'customer', label: 'Nama pelanggan', required: true }, { key: 'phone', label: 'Nomor WhatsApp' }, { key: 'total', label: 'Total', type: 'number' }] },
-  forms: { label: 'Form Builder', intro: 'Buat form dengan field dan simpan di server.', fields: [{ key: 'name', label: 'Nama form', required: true }] },
+  forms: { label: 'Form Builder', unavailable: true, intro: 'Belum tersedia. Pembuatan field form belum ada; form yang sudah ada tetap bisa dihapus.', fields: [{ key: 'name', label: 'Nama form', required: true }] },
   contacts: { label: 'Kontak', intro: 'Daftar kontak pelanggan.', fields: [{ key: 'name', label: 'Nama kontak', required: true }, { key: 'phone', label: 'Nomor WhatsApp' }, { key: 'tag', label: 'Tag' }] },
   templates: { label: 'Template FU', intro: 'Template follow up yang bisa dipakai ulang.', fields: [{ key: 'name', label: 'Nama template', required: true }, { key: 'stage', label: 'Tahap' }, { key: 'body', label: 'Isi pesan', type: 'textarea' }] },
 };
@@ -179,9 +188,9 @@ function domainPage(kind) {
     ? `<label class="field full">${esc(field.label)}<textarea name="${field.key}" rows="3" maxlength="4000"></textarea></label>`
     : `<label class="field">${esc(field.label)}${field.required ? ' *' : ''}<input name="${field.key}" type="${field.type || 'text'}" ${field.required ? 'required' : ''}></label>`).join('');
   content.innerHTML = section(config.label, config.intro, `
-    <form class="form-grid" data-domain-form="${kind}">${fields}
+    ${config.unavailable ? '' : `<form class="form-grid" data-domain-form="${kind}">${fields}
       <div class="section-actions"><button class="button" type="submit">Tambah ${esc(config.label)}</button><p role="status" id="domain-result" class="hint"></p></div>
-    </form>
+    </form>`}
     <div id="domain-list" class="list"><p class="empty">Memuat…</p></div>`);
   loadDomain(kind);
 }
@@ -199,32 +208,34 @@ async function loadDomain(kind) {
   }
 }
 
+const reloadKind = kind => ({ orders: loadOrders, products: loadProducts, contacts: loadContacts, knowledge: knowledgePanel }[kind] || (() => loadDomain(kind)))();
+
 function ordersPage() {
-  content.innerHTML = `<div class="orders-page"><div class="orders-intro"><div><h2>Pesanan</h2><p>Kelola pesanan pelanggan dan status pengirimannya.</p></div><button class="button" data-focus-order-form>+ Tambah Pesanan</button></div><div class="order-summary"><button class="order-status active" data-order-filter="all"><strong id="order-all">0</strong><span>Semua Pesanan</span></button><button class="order-status" data-order-filter="Menunggu Bayar"><strong id="order-waiting">0</strong><span>Menunggu Bayar</span></button><button class="order-status" data-order-filter="Diproses"><strong id="order-process">0</strong><span>Diproses</span></button><button class="order-status" data-order-filter="Selesai"><strong id="order-done">0</strong><span>Selesai</span></button></div><section class="section order-create" id="order-create"><div class="section-head"><div><h2>Tambah Pesanan</h2><p class="intro">Simpan pesanan baru dari percakapan pelanggan.</p></div></div><form class="form-grid" data-domain-form="orders"><label class="field">Nama pelanggan *<input name="customer" required></label><label class="field">Nomor WhatsApp<input name="phone" placeholder="628xxx"></label><label class="field">Total pembayaran<input name="total" type="number" min="0"></label><label class="field">Status<select name="status"><option>Menunggu Bayar</option><option>Diproses</option><option>Selesai</option></select></label><div class="section-actions"><button class="button" type="submit">Simpan Pesanan</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section order-list-section"><div class="section-head"><div><h2>Daftar Pesanan</h2><p class="intro">Pesanan terbaru tersimpan di server.</p></div><input class="order-search" id="order-search" placeholder="Cari pesanan…"></div><div id="order-list" class="order-list"><p class="empty">Memuat pesanan…</p></div></section></div>`;
+  content.innerHTML = `<div class="orders-page"><div class="orders-intro"><div><h2>Pesanan</h2><p>Kelola pesanan pelanggan dan status pengirimannya.</p></div><button class="button" data-focus-order-form>+ Tambah Pesanan</button></div><div class="order-summary"><button class="order-status active" data-order-filter="all"><strong id="order-all">0</strong><span>Semua Pesanan</span></button><button class="order-status" data-order-filter="Menunggu Bayar"><strong id="order-waiting">0</strong><span>Menunggu Bayar</span></button><button class="order-status" data-order-filter="Diproses"><strong id="order-process">0</strong><span>Diproses</span></button><button class="order-status" data-order-filter="Selesai"><strong id="order-done">0</strong><span>Selesai</span></button></div><section class="section order-create" id="order-create"><div class="section-head"><div><h2>Tambah Pesanan</h2><p class="intro">Simpan pesanan baru dari percakapan pelanggan.</p></div></div><form class="form-grid" data-domain-form="orders"><label class="field">Nama pelanggan *<input name="customer" required></label><label class="field">Nomor WhatsApp<input name="phone" placeholder="628xxx"></label><label class="field">Total pembayaran<input name="total" type="number" min="0"></label><label class="field">Status<select name="status"><option>Menunggu Bayar</option><option>Diproses</option><option>Selesai</option></select></label><div class="section-actions"><button class="button" type="submit">Simpan Pesanan</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section order-list-section"><div class="section-head"><div><h2>Daftar Pesanan</h2><p class="intro">Pesanan terbaru tersimpan di server.</p></div><input class="order-search" id="order-search" aria-label="Cari pesanan" placeholder="Cari pesanan…"></div><div id="order-list" class="order-list"><p class="empty">Memuat pesanan…</p></div></section></div>`;
   document.querySelector('#order-search').addEventListener('input', () => { const active = document.querySelector('[data-order-filter].active'); drawOrders(active?.dataset.orderFilter || 'all'); });
   loadOrders();
 }
-async function loadOrders() { const list = document.querySelector('#order-list'); try { const items = await api('orders'); window.__orders = items; for (const [id, status] of [['order-all','all'],['order-waiting','Menunggu Bayar'],['order-process','Diproses'],['order-done','Selesai']]) document.querySelector(`#${id}`).textContent = status === 'all' ? items.length : items.filter(x => x.status === status).length; drawOrders('all'); } catch (e) { list.innerHTML = `<p class="empty">Gagal memuat pesanan: ${esc(e.message)}</p>`; } }
-function drawOrders(filter) { const list = document.querySelector('#order-list'); const q = (document.querySelector('#order-search')?.value || '').toLowerCase(); const items = (window.__orders || []).filter(x => (filter === 'all' || x.status === filter) && `${x.customer} ${x.phone} ${x.status}`.toLowerCase().includes(q)); list.innerHTML = items.length ? items.map(x => `<article class="order-card"><span class="order-avatar">${esc((x.customer || '?').slice(0,1).toUpperCase())}</span><div class="order-main"><strong>${esc(x.customer)}</strong><span>${esc(x.phone || 'Nomor belum diisi')} · ${esc(new Date(x.created_at).toLocaleDateString('id-ID'))}</span></div><strong class="order-total">Rp ${Number(x.total || 0).toLocaleString('id-ID')}</strong><span class="order-badge status-${esc((x.status || '').toLowerCase().replaceAll(' ','-'))}">${esc(x.status)}</span><button class="button secondary" data-domain-delete="orders/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada pesanan</strong><span>Pesanan baru akan muncul di daftar ini.</span></p>'; }
+async function loadOrders() { const list = document.querySelector('#order-list'); try { const items = await api('orders'); window.__orders = items; for (const [id, status] of [['order-all','all'],['order-waiting','Menunggu Bayar'],['order-process','Diproses'],['order-done','Selesai']]) document.querySelector(`#${id}`).textContent = status === 'all' ? items.length : items.filter(x => x.status === status).length; drawOrders(document.querySelector('[data-order-filter].active')?.dataset.orderFilter || 'all'); } catch (e) { list.innerHTML = `<p class="empty">Gagal memuat pesanan: ${esc(e.message)}</p>`; } }
+function drawOrders(filter) { const list = document.querySelector('#order-list'); const q = (document.querySelector('#order-search')?.value || '').toLowerCase(); const items = (window.__orders || []).filter(x => (filter === 'all' || x.status === filter) && `${x.customer} ${x.phone} ${x.status}`.toLowerCase().includes(q)); list.innerHTML = items.length ? items.map(x => `<article class="order-card"><span class="order-avatar">${esc((x.customer || '?').slice(0,1).toUpperCase())}</span><div class="order-main"><strong>${esc(x.customer)}</strong><span>${esc(x.phone || 'Nomor belum diisi')} · ${esc(new Date(x.created_at).toLocaleDateString('id-ID'))}</span></div><strong class="order-total">Rp ${Number(x.total || 0).toLocaleString('id-ID')}</strong><select class="order-status-select" data-order-status="${esc(x.id)}" aria-label="Status pesanan ${esc(x.customer)}">${['Menunggu Bayar','Diproses','Selesai'].map(s => `<option ${s === x.status ? 'selected' : ''}>${s}</option>`).join('')}</select><button class="button secondary" data-domain-delete="orders/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada pesanan</strong><span>Pesanan baru akan muncul di daftar ini.</span></p>'; }
 function productsPage() {
-  content.innerHTML = `<div class="products-page"><div class="products-intro"><div><h2>Produk</h2><p>Kelola katalog produk yang dipakai AI Agent dan pesanan.</p></div><button class="button" data-focus-product-form>+ Tambah Produk</button></div><div class="product-summary"><div><strong id="product-count">0</strong><span>Total Produk</span></div><div><strong id="product-stock">0</strong><span>Total Stok</span></div><div><strong id="product-value">Rp 0</strong><span>Nilai Inventori</span></div></div><section class="section product-create" id="product-create"><div class="section-head"><div><h2>Tambah Produk</h2><p class="intro">Masukkan informasi produk untuk katalog.</p></div></div><form class="form-grid" data-domain-form="products"><label class="field">Nama produk *<input name="name" required></label><label class="field">SKU<input name="sku" placeholder="SKU-001"></label><label class="field">Harga<input name="price" type="number" min="0" placeholder="0"></label><label class="field">Stok<input name="stock" type="number" min="0" placeholder="0"></label><label class="field full">Deskripsi<textarea name="description" rows="3" maxlength="2000" placeholder="Deskripsi singkat produk"></textarea></label><div class="section-actions"><button class="button" type="submit">Simpan Produk</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section product-list-section"><div class="section-head"><div><h2>Daftar Produk</h2><p class="intro">Katalog terbaru tersimpan di server.</p></div><input class="product-search" id="product-search" placeholder="Cari produk atau SKU…"></div><div id="product-list" class="product-list"><p class="empty">Memuat produk…</p></div></section></div>`;
+  content.innerHTML = `<div class="products-page"><div class="products-intro"><div><h2>Produk</h2><p>Kelola katalog produk yang dipakai AI Agent dan pesanan.</p></div><button class="button" data-focus-product-form>+ Tambah Produk</button></div><div class="product-summary"><div><strong id="product-count">0</strong><span>Total Produk</span></div><div><strong id="product-stock">0</strong><span>Total Stok</span></div><div><strong id="product-value">Rp 0</strong><span>Nilai Inventori</span></div></div><section class="section product-create" id="product-create"><div class="section-head"><div><h2>Tambah Produk</h2><p class="intro">Masukkan informasi produk untuk katalog.</p></div></div><form class="form-grid" data-domain-form="products"><label class="field">Nama produk *<input name="name" required></label><label class="field">SKU<input name="sku" placeholder="SKU-001"></label><label class="field">Harga<input name="price" maxlength="240" placeholder="150000 atau daftar harga paket"></label><label class="field">Stok<input name="stock" type="number" min="0" placeholder="0"></label><label class="field full">Deskripsi<textarea name="description" rows="3" maxlength="2000" placeholder="Deskripsi singkat produk"></textarea></label><div class="section-actions"><button class="button" type="submit">Simpan Produk</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section product-list-section"><div class="section-head"><div><h2>Daftar Produk</h2><p class="intro">Katalog terbaru tersimpan di server.</p></div><input class="product-search" id="product-search" aria-label="Cari produk atau SKU" placeholder="Cari produk atau SKU…"></div><div id="product-list" class="product-list"><p class="empty">Memuat produk…</p></div></section></div>`;
   document.querySelector('#product-search').addEventListener('input', () => drawProducts()); loadProducts();
 }
-async function loadProducts() { try { const items = await api('products'); window.__products = items; document.querySelector('#product-count').textContent = items.length; document.querySelector('#product-stock').textContent = items.reduce((n,x) => n + Number(x.stock || 0), 0).toLocaleString('id-ID'); document.querySelector('#product-value').textContent = `Rp ${items.reduce((n,x) => n + Number(x.stock || 0) * Number(x.price || 0), 0).toLocaleString('id-ID')}`; drawProducts(); } catch (e) { document.querySelector('#product-list').innerHTML = `<p class="empty">Gagal memuat produk: ${esc(e.message)}</p>`; } }
-function drawProducts() { const q = (document.querySelector('#product-search')?.value || '').toLowerCase(); const items = (window.__products || []).filter(x => `${x.name} ${x.sku} ${x.description}`.toLowerCase().includes(q)); document.querySelector('#product-list').innerHTML = items.length ? items.map(x => `<article class="product-card"><span class="product-image">◇</span><div class="product-main"><strong>${esc(x.name)}</strong><span>${esc(x.sku || 'Tanpa SKU')}</span><small>${esc(x.description || 'Tidak ada deskripsi')}</small></div><div class="product-price"><strong>Rp ${Number(x.price || 0).toLocaleString('id-ID')}</strong><span>${Number(x.stock || 0).toLocaleString('id-ID')} stok</span></div><button class="button secondary" data-domain-delete="products/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada produk</strong><span>Tambahkan produk pertama ke katalog.</span></p>'; }
+async function loadProducts() { try { const items = await api('products'); window.__products = items; document.querySelector('#product-count').textContent = items.length; document.querySelector('#product-stock').textContent = items.reduce((n,x) => n + Number(x.stock || 0), 0).toLocaleString('id-ID'); document.querySelector('#product-value').textContent = `Rp ${items.reduce((n,x) => n + Number(x.stock || 0) * (Number(x.price) || 0), 0).toLocaleString('id-ID')}`; drawProducts(); } catch (e) { document.querySelector('#product-list').innerHTML = `<p class="empty">Gagal memuat produk: ${esc(e.message)}</p>`; } }
+function drawProducts() { const q = (document.querySelector('#product-search')?.value || '').toLowerCase(); const items = (window.__products || []).filter(x => `${x.name} ${x.sku} ${x.description}`.toLowerCase().includes(q)); document.querySelector('#product-list').innerHTML = items.length ? items.map(x => `<article class="product-card"><span class="product-image">◇</span><div class="product-main"><strong>${esc(x.name)}</strong><span>${esc(x.sku || 'Tanpa SKU')}</span><small>${esc(x.description || 'Tidak ada deskripsi')}</small></div><div class="product-price"><strong>${esc(priceText(x.price))}</strong><span>${Number(x.stock || 0).toLocaleString('id-ID')} stok</span></div><button class="button secondary" data-domain-delete="products/${esc(x.id)}">Hapus</button></article>`).join('') : '<p class="empty"><strong>Belum ada produk</strong><span>Tambahkan produk pertama ke katalog.</span></p>'; }
 function focusProductForm() { document.querySelector('#product-create')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.querySelector('#product-create input[name="name"]')?.focus(); }
 const formsPage = () => domainPage('forms');
 function contactsPage() {
-  content.innerHTML = `<div class="contacts-page"><div class="contacts-intro"><div><h2>Kontak WhatsApp</h2><p>Kelola kontak dan kirim follow up dengan satu klik.</p></div><div class="contact-actions"><button class="button secondary" data-contact-action="groups">⊞ &nbsp; Kelola Grup</button><button class="button secondary" data-contact-action="import">↥ &nbsp; Import Excel</button><button class="button" data-focus-contact-form><svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m4-13v6m-3-3h6"/></svg> Tambah Kontak</button></div></div><div class="contact-summary"><div class="contact-stat total"><span>Total</span><strong id="contact-count">0</strong></div>${[1,2,3,4,5].map(n=>`<div class="contact-stat"><span>FU${n}</span><em>0%</em><strong id="fu-${n}">0 <small>/0</small></strong><i></i></div>`).join('')}</div><section class="section contact-create" id="contact-create"><form class="form-grid" data-domain-form="contacts"><label class="field">Nama kontak *<input name="name" required></label><label class="field">Nomor WhatsApp<input name="phone" placeholder="628xxx"></label><label class="field">Catatan / grup<input name="tag" placeholder="Pelanggan"></label><div class="section-actions"><button class="button" type="submit">Simpan Kontak</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section contact-directory"><div class="directory-head"><div><h2>Daftar Kontak</h2><span id="contact-subtitle">0 kontak</span></div><div class="directory-filters"><select id="contact-group"><option>Semua Grup</option></select><select id="contact-filter"><option>Semua Kontak</option></select><label class="contact-search">⌕<input id="contact-search" placeholder="Cari nama atau nomor…"></label></div></div><div class="directory-tools"><label><input type="checkbox" id="contact-select-all"> Pilih Semua</label><span>Tampilkan <select><option>25</option></select> kontak</span></div><div id="contact-list" class="contact-directory-list"><p class="empty">Memuat kontak…</p></div></section></div>`;
-  document.querySelector('#contact-create').hidden = true; document.querySelector('#contact-search').addEventListener('input', drawContacts); document.querySelector('#contact-select-all').addEventListener('change', e => document.querySelectorAll('.contact-check').forEach(x => { x.checked = e.target.checked; })); loadContacts();
+  content.innerHTML = `<div class="contacts-page"><div class="contacts-intro"><div><h2>Kontak WhatsApp</h2><p>Kelola daftar kontak pelanggan. Kirim follow up belum tersedia.</p></div><div class="contact-actions"><button class="button secondary" type="button" disabled title="Belum tersedia">⊞ &nbsp; Kelola Grup (belum tersedia)</button><button class="button secondary" type="button" disabled title="Belum tersedia">↥ &nbsp; Import Excel (belum tersedia)</button><button class="button" data-focus-contact-form><svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m4-13v6m-3-3h6"/></svg> Tambah Kontak</button></div></div><div class="contact-summary"><div class="contact-stat total"><span>Total</span><strong id="contact-count">0</strong></div><div class="contact-stat"><span>Follow up</span><strong>–</strong><small>Belum tersedia</small></div></div><section class="section contact-create" id="contact-create"><form class="form-grid" data-domain-form="contacts"><input type="hidden" name="id"><label class="field">Nama kontak *<input name="name" required></label><label class="field">Nomor WhatsApp<input name="phone" placeholder="628xxx"></label><label class="field">Catatan / grup<input name="tag" placeholder="Pelanggan"></label><div class="section-actions"><button class="button" type="submit">Simpan Kontak</button><p id="domain-result" class="hint" role="status"></p></div></form></section><section class="section contact-directory"><div class="directory-head"><div><h2>Daftar Kontak</h2><span id="contact-subtitle">0 kontak</span></div><div class="directory-filters"><select id="contact-group" aria-label="Filter grup" disabled title="Belum tersedia"><option>Semua Grup</option></select><select id="contact-filter" aria-label="Filter kontak" disabled title="Belum tersedia"><option>Semua Kontak</option></select><label class="contact-search">⌕<input id="contact-search" aria-label="Cari nama atau nomor" placeholder="Cari nama atau nomor…"></label></div></div><div class="directory-tools"><label><input type="checkbox" id="contact-select-all" disabled title="Belum tersedia"> Pilih Semua</label><span class="hint">Filter grup dan pilih massal belum tersedia.</span></div><div id="contact-list" class="contact-directory-list"><p class="empty">Memuat kontak…</p></div></section></div>`;
+  document.querySelector('#contact-create').hidden = true; document.querySelector('#contact-search').addEventListener('input', drawContacts); loadContacts();
 }
-async function loadContacts() { try { window.__contacts = await api('contacts'); document.querySelector('#contact-count').textContent = window.__contacts.length; document.querySelector('#contact-subtitle').textContent = `${window.__contacts.length} kontak`; for (let n=1;n<=5;n++) document.querySelector(`#fu-${n}`).innerHTML = `0 <small>/${window.__contacts.length}</small>`; drawContacts(); } catch (e) { document.querySelector('#contact-list').innerHTML = `<p class="empty">Gagal memuat kontak: ${esc(e.message)}</p>`; } }
-function drawContacts() { const q=(document.querySelector('#contact-search')?.value||'').toLowerCase(); const xs=(window.__contacts||[]).filter(x=>`${x.name} ${x.phone} ${x.tag}`.toLowerCase().includes(q)); document.querySelector('#contact-list').innerHTML=xs.length?`<div class="contact-table-head"><span>Nama</span><span>Nomor WA</span><span>Catatan</span><span>Follow Up</span></div>${xs.map(x=>`<article class="contact-directory-row"><input class="contact-check" type="checkbox"><span class="contact-name"><b>${esc((x.name||'?').slice(0,1).toUpperCase())}</b><strong>${esc(x.name)}</strong></span><span>${esc(x.phone||'-')}</span><span>${esc(x.tag||'-')}</span><span class="follow-actions">${[1,2,3,4,5].map(n=>`<button type="button" title="Kirim FU${n}"><svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 18-8-8 18-2-8-8-2Zm8 2L21 3"/></svg> ${n}</button>`).join('')}</span></article>`).join('')}`:'<p class="empty"><strong>Belum ada kontak</strong><span>Tambahkan kontak atau import dari Excel.</span></p>'; }
+async function loadContacts() { try { window.__contacts = await api('contacts'); document.querySelector('#contact-count').textContent = window.__contacts.length; document.querySelector('#contact-subtitle').textContent = `${window.__contacts.length} kontak`; drawContacts(); } catch (e) { document.querySelector('#contact-list').innerHTML = `<p class="empty">Gagal memuat kontak: ${esc(e.message)}</p>`; } }
+function drawContacts() { const q=(document.querySelector('#contact-search')?.value||'').toLowerCase(); const xs=(window.__contacts||[]).filter(x=>`${x.name} ${x.phone} ${x.tag}`.toLowerCase().includes(q)); document.querySelector('#contact-list').innerHTML=xs.length?`<div class="contact-table-head"><span>Nama</span><span>Nomor WA</span><span>Catatan</span><span>Follow Up</span></div>${xs.map(x=>`<article class="contact-directory-row"><input class="contact-check" type="checkbox" aria-label="Pilih ${esc(x.name)}" disabled title="Belum tersedia"><span class="contact-name"><b>${esc((x.name||'?').slice(0,1).toUpperCase())}</b><strong>${esc(x.name)}</strong></span><span>${esc(x.phone||'-')}</span><span>${esc(x.tag||'-')}</span><span class="follow-actions">${[1,2,3,4,5].map(n=>`<button type="button" disabled title="Kirim FU${n}: belum tersedia" aria-label="Kirim FU${n}, belum tersedia"><svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 18-8-8 18-2-8-8-2Zm8 2L21 3"/></svg> ${n}</button>`).join('')}<button class="button secondary" type="button" data-contact-edit="${esc(x.id)}">Ubah</button><button class="button secondary" type="button" data-domain-delete="contacts/${esc(x.id)}">Hapus</button></span></article>`).join('')}`:'<p class="empty"><strong>Belum ada kontak</strong><span>Tambahkan kontak atau import dari Excel.</span></p>'; }
 function templatesPage() {
-  content.innerHTML = `<div class="templates-page"><div class="template-intro"><h2>Template FU</h2><p>Atur pesan follow up otomatis agar pelanggan tetap terhubung.</p></div><section class="section rotator-guide"><div class="guide-title"><span class="guide-icon">↻</span><div><h2>Panduan Rotasi Follow Up</h2><p class="intro">Gunakan urutan FU untuk mengirim pesan secara bertahap dan personal.</p></div></div><div class="guide-grid"><div><span>FU1 · Perkenalan</span><small>Pesan pertama setelah pelanggan masuk.</small><code>Hari ke-0</code></div><div><span>FU2 · Pengingat</span><small>Ingatkan pelanggan dengan konteks chat.</small><code>Hari ke-1</code></div><div><span>FU3–FU5 · Nurture</span><small>Bangun hubungan tanpa mengirim spam.</small><code>Hari ke-3+</code></div></div></section><div class="template-editor-list">${[1,2,3,4,5].map(n=>`<section class="section fu-editor"><div class="fu-editor-head"><div class="fu-title"><span class="fu-badge">FU${n}</span><div><h2>${['Perkenalan','Pengingat','Penawaran','Follow Up','Terakhir'][n-1]}</h2><p class="intro">Template pesan tahap ${n}.</p></div></div><label class="switch"><input type="checkbox" data-template-enabled="${n}" checked><span class="track"></span></label></div><div class="fu-form-grid"><label class="field">Nama template<input data-template-name="${n}" value="FU${n} - ${['Perkenalan','Pengingat','Penawaran','Follow Up','Terakhir'][n-1]}"></label><label class="field">Jeda pengiriman<select data-template-stage="${n}"><option>Hari ke-${n-1}</option><option>Hari ke-${n}</option><option>Hari ke-${n+1}</option></select></label></div><label class="field fu-message">Pesan<textarea data-template-body="${n}" rows="4" maxlength="4000" placeholder="Tulis pesan follow up…"></textarea></label><div class="section-actions"><button class="button" data-template-save="${n}">Simpan Template</button><p class="hint" data-template-result="${n}"></p></div></section>`).join('')}</div></div>`;
+  content.innerHTML = `<div class="templates-page"><div class="template-intro"><h2>Template FU</h2><p>Simpan naskah follow up. Pengiriman otomatis belum tersedia, jadi template belum dikirim ke pelanggan.</p></div><section class="section rotator-guide"><div class="guide-title"><span class="guide-icon">↻</span><div><h2>Panduan Rotasi Follow Up</h2><p class="intro">Gunakan urutan FU untuk mengirim pesan secara bertahap dan personal.</p></div></div><div class="guide-grid"><div><span>FU1 · Perkenalan</span><small>Pesan pertama setelah pelanggan masuk.</small><code>Hari ke-0</code></div><div><span>FU2 · Pengingat</span><small>Ingatkan pelanggan dengan konteks chat.</small><code>Hari ke-1</code></div><div><span>FU3–FU5 · Nurture</span><small>Bangun hubungan tanpa mengirim spam.</small><code>Hari ke-3+</code></div></div></section><div class="template-editor-list">${[1,2,3,4,5].map(n=>`<section class="section fu-editor"><div class="fu-editor-head"><div class="fu-title"><span class="fu-badge">FU${n}</span><div><h2>${['Perkenalan','Pengingat','Penawaran','Follow Up','Terakhir'][n-1]}</h2><p class="intro">Template pesan tahap ${n}.</p></div></div><label class="switch"><input type="checkbox" data-template-enabled="${n}" disabled title="Belum tersedia"><span class="track"></span></label></div><div class="fu-form-grid"><label class="field">Nama template<input data-template-name="${n}" value="FU${n} - ${['Perkenalan','Pengingat','Penawaran','Follow Up','Terakhir'][n-1]}"></label><label class="field">Jeda pengiriman<select data-template-stage="${n}" disabled title="Belum tersedia"><option>Hari ke-${n-1}</option><option>Hari ke-${n}</option><option>Hari ke-${n+1}</option></select></label></div><label class="field fu-message">Pesan<textarea data-template-body="${n}" rows="4" maxlength="4000" placeholder="Tulis pesan follow up…"></textarea></label><div class="section-actions"><button class="button" data-template-save="${n}">Simpan Template</button><p class="hint" role="status" data-template-result="${n}"></p></div></section>`).join('')}</div></div>`;
   loadTemplates();
 }
-async function loadTemplates() { try { const items = await api('templates'); for (const item of items) { const n = Number((item.stage || '').match(/\d+/)?.[0]); if (!n) continue; const name=document.querySelector(`[data-template-name="${n}"]`), body=document.querySelector(`[data-template-body="${n}"]`); if(name)name.value=item.name; if(body)body.value=item.body; } } catch {} }
+async function loadTemplates() { try { const items = await api('templates'); const seen = new Set(); /* newest first: the latest save wins */ for (const item of items) { const n = Number((item.stage || '').match(/\d+/)?.[0]); if (!n || seen.has(n)) continue; seen.add(n); const name=document.querySelector(`[data-template-name="${n}"]`), body=document.querySelector(`[data-template-body="${n}"]`); if(name)name.value=item.name; if(body)body.value=item.body; } } catch (e) { notify(document.querySelector('[data-template-result="1"]'), `Gagal memuat template: ${e.message}`, 'error'); } }
 
 function accountPage() {
   content.innerHTML = section('Akun & Langganan', 'Paket, kuota, dan profil toko.', '<p class="empty">Belum tersedia. Billing dan kuota belum diimplementasikan di gateway ini.</p>');
@@ -265,39 +276,50 @@ content.addEventListener('click', async event => {
   if (!button) return;
   if (button.matches('[data-focus-order-form]')) { document.querySelector('#order-create')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.querySelector('#order-create input[name="customer"]')?.focus(); return; }
   if (button.matches('[data-focus-product-form]')) { focusProductForm(); return; }
-  if (button.matches('[data-focus-contact-form]')) { const form = document.querySelector('#contact-create'); form.hidden = false; form.scrollIntoView({ behavior: 'smooth', block: 'start' }); form.querySelector('input[name="name"]')?.focus(); return; }
-  if (button.matches('[data-contact-action="groups"]')) { notify(document.querySelector('#contact-subtitle'), 'Grup kontak akan tersedia setelah kontak pertama ditambahkan.', 'info'); return; }
-  if (button.matches('[data-contact-action="import"]')) { alert('Import Excel segera tersedia. Untuk sekarang tambahkan kontak melalui form.'); return; }
+  if (button.matches('[data-focus-contact-form], [data-contact-edit]')) {
+    const section = document.querySelector('#contact-create'), form = section.querySelector('form');
+    const contact = (window.__contacts || []).find(item => item.id === button.dataset.contactEdit);
+    form.reset();
+    for (const key of ['id', 'name', 'phone', 'tag']) form.elements[key].value = contact?.[key] ?? '';
+    section.hidden = false;
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    form.elements.name.focus();
+    return;
+  }
   if (button.matches('[data-order-filter]')) { document.querySelectorAll('[data-order-filter]').forEach(item => item.classList.toggle('active', item === button)); drawOrders(button.dataset.orderFilter); return; }
-  if (button.matches('[data-template-save]')) { const n=button.dataset.templateSave; const result=document.querySelector(`[data-template-result="${n}"]`); try { await api('templates', post({ name: document.querySelector(`[data-template-name="${n}"]`).value, body: document.querySelector(`[data-template-body="${n}"]`).value, stage: `FU${n}` })); notify(result, 'Template tersimpan di server.', 'ok'); } catch (e) { notify(result, e.message, 'error'); } return; }
-  const result = document.querySelector('#domain-result');
+  if (button.matches('[data-template-save]')) { const n=button.dataset.templateSave; const result=document.querySelector(`[data-template-result="${n}"]`); button.disabled = true; try { await api('templates', post({ name: document.querySelector(`[data-template-name="${n}"]`).value, body: document.querySelector(`[data-template-body="${n}"]`).value, stage: `FU${n}` })); notify(result, 'Template tersimpan di server.', 'ok'); } catch (e) { notify(result, e.message, 'error'); } finally { button.disabled = false; } return; }
   try {
     if (button.matches('[data-save-settings]')) {
       const target = document.querySelector('#settings-result');
+      const minInput = document.querySelector('#set-min'), maxInput = document.querySelector('#set-max');
+      const minInterval = Number(minInput.value), maxInterval = Number(maxInput.value);
+      if (!Number.isInteger(minInterval) || !Number.isInteger(maxInterval) || minInterval < 1 || maxInterval > 600 || minInterval > maxInterval) { notify(target, 'Interval harus bilangan bulat 1–600 detik, dan minimum tidak boleh melebihi maksimum.', 'error'); return; }
       button.disabled = true;
       try {
-        const saved = await api('settings', post({
-          minInterval: Number(document.querySelector('#set-min').value),
-          maxInterval: Number(document.querySelector('#set-max').value),
-          rotation: document.querySelector('#set-rotation').value,
-          scheduleEnabled: document.querySelector('#set-schedule-enabled').checked,
-          scheduleStart: document.querySelector('#set-schedule-start').value,
-          scheduleEnd: document.querySelector('#set-schedule-end').value,
-          dailyLimit: Number(document.querySelector('#set-daily-limit').value),
-          sendMode: document.querySelector('#set-send-mode').value,
-          autoReply: document.querySelector('#set-auto-reply').checked,
-          saveHistory: document.querySelector('#set-save-history').checked,
-          manualShippingPriority: document.querySelector('#set-manual-shipping-priority').checked,
-        }));
-        notify(target, `Tersimpan: interval ${saved.minInterval}–${saved.maxInterval} detik, ${saved.rotation}.`, 'ok');
+        // Only the interval: this button must never change the AI or history toggles.
+        const saved = await api('settings', post({ minInterval, maxInterval }));
+        minInput.value = saved.minInterval; maxInput.value = saved.maxInterval;
+        notify(target, `Tersimpan: interval ${saved.minInterval}–${saved.maxInterval} detik.`, 'ok');
       } finally { button.disabled = false; }
     }
-    if (button.matches('[data-save-shipping]')) {
-      const target = document.querySelector('#shipping-result');
+    if (button.matches('[data-save-schedule]')) {
+      const target = document.querySelector('#schedule-result');
+      const scheduleStart = document.querySelector('#set-schedule-start').value, scheduleEnd = document.querySelector('#set-schedule-end').value;
+      if (!scheduleStart || !scheduleEnd || scheduleStart >= scheduleEnd) { notify(target, 'Jam mulai harus lebih awal dari jam selesai.', 'error'); return; }
       button.disabled = true;
       try {
-        const saved = await api('settings', post({ couriers: [...document.querySelectorAll('input[name=courier]:checked')].map(box => box.value) }));
-        notify(target, `Tersimpan: ${saved.couriers.length} ekspedisi.`, 'ok');
+        await api('settings', post({ scheduleEnabled: document.querySelector('#set-schedule-enabled').checked, scheduleStart, scheduleEnd }));
+        notify(target, 'Waktu operasional tersimpan.', 'ok');
+      } finally { button.disabled = false; }
+    }
+    if (button.matches('[data-save-delivery]')) {
+      const target = document.querySelector('#delivery-result');
+      const dailyLimit = Number(document.querySelector('#set-daily-limit').value);
+      if (!Number.isInteger(dailyLimit) || dailyLimit < 0) { notify(target, 'Batas harian harus bilangan bulat 0 atau lebih.', 'error'); return; }
+      button.disabled = true;
+      try {
+        const saved = await api('settings', post({ dailyLimit }));
+        notify(target, saved.dailyLimit ? `Tersimpan: ${saved.dailyLimit} pesan per hari.` : 'Tersimpan: tanpa batas harian.', 'ok');
       } finally { button.disabled = false; }
     }
     if (button.matches('[data-save-shipping-pdf]')) {
@@ -313,9 +335,11 @@ content.addEventListener('click', async event => {
     }
     if (button.matches('[data-send-message]')) {
       const target = document.querySelector('#send-result');
+      const phone = normalizePhone(document.querySelector('#phone').value);
+      if (!phone) { notify(target, INVALID_PHONE, 'error'); return; }
       button.disabled = true;
       try {
-        const sent = await api('send', post({ phone: document.querySelector('#phone').value, text: document.querySelector('#message').value }));
+        const sent = await api('send', post({ phone, text: document.querySelector('#message').value, number: document.querySelector('#send-number').value || undefined }));
         notify(target, `Pesan diserahkan ke WhatsApp (${sent.status}).`, 'ok');
       } finally { button.disabled = false; }
     }
@@ -371,20 +395,30 @@ content.addEventListener('click', async event => {
       finally { button.disabled = false; }
     }
     if (button.matches('[data-domain-delete]')) {
+      const name = button.closest('article')?.querySelector('strong')?.textContent || 'data ini';
+      if (!confirm(`Hapus "${name}"? Tindakan ini tidak bisa dibatalkan.`)) return;
       button.disabled = true;
       const [kind, id] = button.dataset.domainDelete.split('/');
       await api(`${kind}/${id}`, { method: 'DELETE' });
-      if (kind === 'knowledge') knowledgePanel(); else loadDomain(kind);
+      await reloadKind(kind);
     }
   } catch (error) {
-    const target = document.querySelector('#domain-result') || document.querySelector('#settings-result') || document.querySelector('#send-result') || document.querySelector('#ai-provider-result') || document.querySelector('#agent-result') || document.querySelector('#knowledge-result');
-    notify(target, error.message, 'error');
-    if (!target) alert(error.message);
+    // Report next to the button that failed, not in the first status line on the page.
+    const target = button.closest('.section-actions')?.querySelector('[role="status"]');
+    if (target) notify(target, error.message, 'error'); else alert(error.message);
     button.disabled = false;
   }
 });
 
 content.addEventListener('change', async event => {
+  if (event.target.matches('[data-order-status]')) {
+    const select = event.target;
+    select.disabled = true;
+    try { await api(`orders/${select.dataset.orderStatus}`, { method: 'PATCH', body: JSON.stringify({ status: select.value }) }); }
+    catch (error) { alert(error.message); }
+    await loadOrders();
+    return;
+  }
   if (!event.target.matches('#set-manual-shipping-priority')) return;
   const target = document.querySelector('#shipping-pdf-result');
   try {
@@ -401,6 +435,8 @@ content.addEventListener('submit', async event => {
   if (form.matches('#knowledge-form')) {
     event.preventDefault();
     const target = document.querySelector('#knowledge-result');
+    const submit = form.querySelector('[type=submit]');
+    submit.disabled = true;
     try {
       const file = document.querySelector('#knowledge-file').files[0];
       if (!file || file.type !== 'application/pdf') throw Error('Pilih file PDF yang valid.');
@@ -412,6 +448,7 @@ content.addEventListener('submit', async event => {
       await knowledgePanel();
       notify(document.querySelector('#knowledge-result'), 'PDF berhasil dibaca dan siap menjadi referensi AI.', 'ok');
     } catch (error) { notify(target, error.message, 'error'); }
+    finally { submit.disabled = false; }
     return;
   }
   if (form.matches('[data-domain-form]')) {
@@ -419,17 +456,31 @@ content.addEventListener('submit', async event => {
     const kind = form.dataset.domainForm;
     const payload = {};
     for (const [key, value] of new FormData(form)) payload[key] = value;
+    if (payload.phone) {
+      payload.phone = normalizePhone(payload.phone);
+      if (!payload.phone) { notify(document.querySelector('#domain-result'), INVALID_PHONE, 'error'); return; }
+    }
+    const submit = form.querySelector('[type=submit]');
+    submit.disabled = true;
     try {
-      await api(kind, post(payload));
+      const { id, ...fields } = payload;
+      await api(id ? `${kind}/${id}` : kind, id ? { method: 'PATCH', body: JSON.stringify(fields) } : post(fields));
       form.reset();
-      if (kind === 'orders') await loadOrders(); else if (kind === 'products') await loadProducts(); else if (kind === 'contacts') await loadContacts(); else await loadDomain(kind);
+      if (form.elements.id) form.elements.id.value = '';
+      await reloadKind(kind);
       notify(document.querySelector('#domain-result'), 'Data tersimpan di server.', 'ok');
     } catch (error) { notify(document.querySelector('#domain-result'), error.message, 'error'); }
+    finally { submit.disabled = false; }
   }
 });
 
-document.querySelectorAll('.nav a').forEach(link => link.addEventListener('click', () => setTimeout(render, 0)));
 addEventListener('hashchange', render);
+document.querySelector('#logout').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try { await api('logout', { method: 'POST' }); location.href = '/login'; }
+  catch (error) { button.disabled = false; alert(`Logout gagal: ${error.message}`); }
+});
 render();
 
 // Presentation only: navigation drawer and phone inbox panes share the existing routes.
