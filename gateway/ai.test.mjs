@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
 import { createAutoReply } from './auto-reply.mjs';
 import { openMessages } from './messages.mjs';
@@ -12,6 +13,16 @@ const folder = await mkdtemp(join(tmpdir(), 'cspoint-ai-test-'));
 const path = join(folder, 'qa.sqlite');
 const secret = 'test-only-server-encryption-secret';
 const apiKey = 'qa-router-secret-not-for-production';
+const legacyPath = join(folder, 'legacy.sqlite'), legacyDb = new DatabaseSync(legacyPath), legacyTime = Date.now();
+legacyDb.exec('CREATE TABLE ai_reply_claims (message_id TEXT PRIMARY KEY, day TEXT NOT NULL); CREATE TABLE messages (id TEXT PRIMARY KEY, jid TEXT NOT NULL, name TEXT NOT NULL, text TEXT NOT NULL, outgoing INTEGER NOT NULL, timestamp INTEGER NOT NULL);');
+legacyDb.prepare('INSERT INTO ai_reply_claims VALUES (?,?)').run('legacy-failed', '2026-11-04');
+legacyDb.prepare('INSERT INTO messages VALUES (?,?,?,?,?,?)').run('legacy-failed', 'lead@s.whatsapp.net', '', 'berapa total?', 0, legacyTime);
+legacyDb.prepare('INSERT INTO ai_reply_claims VALUES (?,?)').run('legacy-replied', '2026-11-04');
+legacyDb.prepare('INSERT INTO messages VALUES (?,?,?,?,?,?)').run('legacy-replied', 'customer@s.whatsapp.net', '', 'halo', 0, legacyTime - 5000);
+legacyDb.prepare('INSERT INTO messages VALUES (?,?,?,?,?,?)').run('outgoing-reply', 'customer@s.whatsapp.net', '', 'Halo kak', 1, legacyTime - 4000);
+const legacyConfig = openAiConfig(legacyPath, secret);
+assert.deepEqual(legacyConfig.pendingReplies(), ['legacy-failed'], 'recent messages that failed before migration are requeued');
+legacyConfig.close(); legacyDb.close();
 let config = openAiConfig(path, secret), calls = 0, reject = false, missingModel = false, lastPayload;
 const server = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -46,11 +57,19 @@ try {
   assert.equal(config.credentials().apiKey, apiKey, 'encrypted key survives restart');
   assert.throws(() => config.save({ apiKey: 'bad\nkey' }), /tidak valid/);
   assert.throws(() => config.save({ model: '' }), /tidak valid/);
+  assert.equal(config.claimReply('queued-message', '2026-11-04', 0), true);
+  config.deferReply('queued-message');
+  assert.deepEqual(config.pendingReplies(), ['queued-message'], 'failed replies remain queued for reconnect');
+  assert.equal(config.claimReply('queued-message', '2026-11-04', 0), true, 'pending replies can be retried');
+  config.finishReply('queued-message');
+  assert.deepEqual(config.pendingReplies(), []);
+  assert.equal(config.claimReply('queued-message', '2026-11-04', 0), false, 'completed replies are not duplicated');
 
   assert.deepEqual(await router.models(), ['Fallback']);
   const prompt = buildAiMessages({ assistantName: 'CSPoint', instructions: 'Jawab ramah.' }, [{ text: 'Halo', outgoing: false }]);
   assert.match(await router.complete(prompt), /CSPoint/);
   assert.equal(lastPayload.model, 'Fallback');
+  assert.equal(lastPayload.max_tokens, 320);
   assert.equal(lastPayload.messages[0].role, 'system');
   assert.equal(lastPayload.messages.at(-1).role, 'user');
   reject = true;
@@ -67,6 +86,7 @@ try {
   const connection = { isCurrent: () => current, markRead: async message => { reads.push(message.id); }, send: async (jid, payload) => { sent.push({ jid, ...payload }); return { key: { id: `out-${sent.length}` } }; } };
   const inbound = { id: 'in-1', jid: '628123450000@s.whatsapp.net', text: 'Berapa ongkir ke Kecamatan Bubon?', outgoing: false, timestamp: simulatedNow.getTime() };
   assert.equal(messages.add(inbound), true);
+  assert.equal(messages.byId(inbound.id).text, inbound.text);
   assert.equal(messages.add(inbound), false, 'duplicate WhatsApp delivery is recognized');
   const delays = [];
   const reply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async ms => { delays.push(ms); }, now: () => simulatedNow });
@@ -82,16 +102,18 @@ try {
   assert.deepEqual(reads, [inbound.id], 'enabled AI acknowledges the incoming message before replying');
   assert.equal(delays.length, 0, 'first reply has no artificial interval delay');
   assert.match(lastPayload.messages[0].content, /Bubon \/ Aceh Barat → Rp40\.000/, 'shipping PDF tariff is included in the AI context');
+  assert.match(lastPayload.messages[0].content, /Terus bantu calon pelanggan sampai pesanan siap dikonfirmasi/);
   assert.equal(messages.thread(inbound.jid).at(-1).outgoing, 1);
   const afterReply = calls;
   await reply(inbound, connection);
-  await reply({ ...inbound, id: 'in-2' }, connection);
-  assert.equal(calls, afterReply, 'deduplication and daily cap prevent extra inference');
-  assert.equal(sent.length, 1);
+  await reply({ ...inbound, id: 'in-2', text: 'Totalnya berapa kak?' }, connection);
+  assert.equal(calls, afterReply + 1, 'AI replies to every new inbound message without a daily cap');
+  assert.equal(sent.length, 2);
+  const afterSecondReply = calls;
   store.saveSettings({ dailyLimit: 0 });
   current = false;
   await reply({ ...inbound, id: 'in-3' }, connection);
-  assert.equal(calls, afterReply, 'stale connection must not trigger inference');
+  assert.equal(calls, afterSecondReply, 'stale connection must not trigger inference');
   current = true;
   const cancellingReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => { current = false; }, now: () => simulatedNow });
   await cancellingReply({ ...inbound, id: 'in-4a' }, connection);
@@ -104,22 +126,38 @@ try {
   const scheduledReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {}, now: () => new Date('2026-11-04T05:00:00Z') });
   const beforeSchedule = calls;
   await scheduledReply({ ...inbound, id: 'in-5' }, connection);
-  assert.equal(calls, beforeSchedule, 'outside configured Jakarta hours must not trigger inference');
+  assert.equal(calls, beforeSchedule + 1, 'AI inbox replies are not suppressed by operating hours');
 
   store.saveSettings({ scheduleEnabled: false, dailyLimit: 0 });
   let retryCalls = 0, retrySent = 0, retryDelay = 0;
   const retryReply = createAutoReply({
     store, config, messages, buildMessages: buildAiMessages,
-    router: { complete: async () => { if (++retryCalls === 1) throw Object.assign(new Error('temporary upstream error'), { status: 502 }); return 'Tarif ditemukan.'; } },
+    router: { complete: async () => { if (++retryCalls < 3) throw Object.assign(new Error('temporary upstream error'), { status: 502 }); return 'Tarif ditemukan.'; } },
     sleep: async ms => { retryDelay = ms; },
     onError: error => { throw error; },
     now: () => simulatedNow,
   });
   await retryReply({ ...inbound, id: 'in-6' }, { isCurrent: () => true, send: async () => { retrySent++; return { key: { id: 'out-retry' } }; } });
-  assert.equal(retryCalls, 2, 'temporary router failure receives one retry');
-  assert.equal(retryDelay, 1000, 'retry waits briefly before contacting 9Router again');
+  assert.equal(retryCalls, 3, 'temporary router failures receive multiple retries');
+  assert.equal(retryDelay, 2000, 'retry backs off before the final 9Router attempt');
   assert.equal(retrySent, 1, 'retry sends only one WhatsApp reply');
-  console.log('PASS: encrypted key persistence/redaction, 9Router auth/models/completions, sanitized errors, auto-reply switches, history, deduplication, daily cap, reconnect cancellation and schedule');
+
+  let fallbackFailure, fallbackSent = '';
+  const fallbackReply = createAutoReply({
+    store, config, messages, buildMessages: buildAiMessages,
+    router: { complete: async () => { throw Object.assign(new Error('empty model response'), { status: 502 }); } },
+    sleep: async () => {}, onError: error => { fallbackFailure = error; }, now: () => simulatedNow,
+  });
+  await fallbackReply({ ...inbound, id: 'in-7' }, { isCurrent: () => true, send: async (_jid, payload) => { fallbackSent = payload.text; return { key: { id: 'out-fallback' } }; } });
+  assert.match(fallbackSent, /pesan dan detail.*sudah saya terima/i, 'a model outage still gets a helpful WhatsApp reply');
+  assert.equal(fallbackFailure.fallbackSent, true, 'fallback delivery is visible in gateway health');
+
+  const longInstruction = `Instruksi panjang ${'Aturan toko yang sudah disetujui. '.repeat(300)}`;
+  const contextMessages = buildAiMessages({ assistantName: 'CSPoint', instructions: longInstruction }, [{ text: 'Saya pesan Paket 3, 50 pcs. Total berapa?', outgoing: false }], Array.from({ length: 8 }, (_, index) => ({ name: index === 7 ? 'Paket 3' : `Barang ${index}`, sku: '', description: 'produk', price: 10000 + index, stock: 1 })), Array.from({ length: 5 }, (_, index) => ({ name: `Referensi ${index}`, content: 'tarif'.repeat(500) })));
+  assert.ok(contextMessages[0].content.includes(longInstruction), 'long admin instructions remain intact');
+  assert.ok(contextMessages[0].content.length < longInstruction.length + 7000, 'catalog and PDF context are kept compact');
+  assert.match(contextMessages[0].content, /"name":"Paket 3"/, 'catalog context prioritizes the product named in the order');
+  console.log('PASS: encrypted key persistence/redaction, 9Router auth/models/completions, uncapped replies, schedule independence, history, retries, reconnect cancellation and sales context');
 } finally {
   config.close(); store.close(); messages.close();
   server.closeAllConnections();

@@ -35,10 +35,11 @@ const aiRouter = createRouterClient(aiConfig);
 const autoReply = createAutoReply({ store, config: aiConfig, router: aiRouter, messages, buildMessages: buildAiMessages,
   onError: error => {
     const code = Number.isInteger(error?.status) ? error.status : 500;
-    const message = code === 400 ? 'Konfigurasi AI tidak valid.'
+    const message = error?.fallbackSent ? 'Balasan bantuan sudah dikirim; koneksi AI perlu diperiksa.'
+      : code === 400 ? 'Konfigurasi AI tidak valid.'
       : code === 401 ? 'API key 9Router ditolak.'
         : code === 422 ? 'Model 9Router tidak tersedia atau responsnya tidak valid.'
-          : code === 502 ? '9Router atau pengiriman WhatsApp gagal setelah satu kali percobaan ulang.'
+          : code === 502 ? '9Router atau pengiriman WhatsApp gagal setelah beberapa percobaan.'
             : 'Balasan AI gagal diproses.';
     autoReplyFailure = { code, message, at: Date.now() };
     console.error(`AI auto-reply failed (status=${code})`);
@@ -141,6 +142,7 @@ function connect() {
 
   socket = current;
   const isCurrent = () => generation === connectionGeneration && socket === current;
+  const replyTo = message => autoReply(message, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, isCurrent() && status === 'connected' ? current : null, item.jid, [item.id]) });
 
   current.ev.on('creds.update', () => {
     if (!isCurrent()) return;
@@ -156,8 +158,8 @@ function connect() {
         if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
         const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now() };
         const fresh = messages.add(saved);
-        if (fresh && type === 'notify' && !saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
-          void autoReply(saved, { isCurrent: () => isCurrent() && status === 'connected', send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, isCurrent() && status === 'connected' ? current : null, item.jid, [item.id]) });
+        if (type === 'notify' && !saved.outgoing && Math.abs(Date.now() - saved.timestamp) < 120000) {
+          void replyTo(fresh ? saved : messages.byId(saved.id));
         }
       }
     } catch { console.error('Unable to persist incoming messages'); }
@@ -185,6 +187,10 @@ function connect() {
       retryAttempt = 0;
       lastClose = null;
       console.error('WhatsApp connection open');
+      for (const id of aiConfig.pendingReplies()) {
+        const message = messages.byId(id);
+        if (message && !message.outgoing) void replyTo(message);
+      }
     }
 
     if (update.connection === 'close') {

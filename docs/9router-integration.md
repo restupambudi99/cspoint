@@ -21,16 +21,19 @@ hasApiKey. Kolom kosong saat menyimpan mempertahankan key lama. Jangan mengubah
 GATEWAY_TOKEN tanpa bersiap mengisi ulang key. Backup database dan environment
 harus dilindungi seperti kredensial lainnya.
 
-Alur otomatis hanya memproses pesan teks baru dari chat pribadi, bukan grup,
-pesan sendiri, atau sinkronisasi riwayat. Pesan yang sudah tersimpan tidak memicu
-balasan kedua. Batas harian menghitung slot percobaan AI dalam tanggal WIB;
-0 berarti tanpa batas. Kesalahan tidak dicoba ulang otomatis. Antrean dibatasi
-20 pesan dan diproses berurutan. Jam operasional, interval kirim, kedua toggle,
-dan koneksi diperiksa sebelum mengirim. Reconnect atau perubahan konfigurasi
-saat inferensi berlangsung membatalkan pengiriman lama.
+Alur otomatis memproses pesan teks chat pribadi, termasuk pelanggan baru dan
+lama; grup, pesan sendiri, dan sinkronisasi riwayat dikecualikan. Inbox AI tidak
+memakai batas jumlah balasan atau jam operasional. Antrean diproses berurutan,
+kesalahan model 502 dicoba ulang hingga empat kali, dan pesan yang gagal tetap
+tersimpan untuk dicoba kembali setelah WhatsApp tersambung. Jika model tetap
+gagal tetapi WhatsApp tersedia, pelanggan menerima balasan bantuan singkat.
+Kedua toggle dan koneksi tetap harus aktif; jeda kirim mengikuti Pengaturan.
 
-Konteks AI: instruksi admin, 12 pesan terakhir, dan hingga 30 produk terbaru.
-PDF dan kalkulasi tarif ongkir belum digunakan oleh mesin AI ini.
+Konteks AI mencakup instruksi admin penuh, hingga delapan pesan terakhir,
+maksimal dua kutipan Knowledge yang paling relevan, dan maksimal lima produk
+yang cocok dengan percakapan. Balasan diarahkan mengumpulkan nama, alamat,
+produk/varian, jumlah, dan menghitung total hanya dari harga serta ongkir yang
+tersimpan; data yang tidak ada harus dikonfirmasi, tidak boleh dikarang.
 
 Uji: node gateway/ai.test.mjs, node gateway/ai-http.test.mjs,
 node gateway/smoke.test.mjs. Kedua uji AI menggunakan router tiruan dan key uji,

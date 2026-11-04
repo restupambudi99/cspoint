@@ -41,13 +41,13 @@ function settingsPage() {
         <label class="field">Rotasi<select id="set-rotation"><option>Round Robin (Bergantian)</option><option>Random (Acak)</option></select></label>
       </div>
       <div class="section-actions"><button class="button" data-save-settings>Simpan Pengaturan</button><p role="status" id="settings-result" class="hint"></p></div>`),
-    section('Waktu Operasional', 'Pesan otomatis hanya dikirim pada waktu yang Anda tentukan.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan batas waktu</strong><span>Batasi pengiriman pesan di luar jam kerja.</span></div><label class="switch"><input id="set-schedule-enabled" type="checkbox"><span class="track"></span></label></div><div class="form-grid schedule-fields"><label class="field">Mulai<input id="set-schedule-start" type="time" value="08:00"></label><label class="field">Selesai<input id="set-schedule-end" type="time" value="21:00"></label></div>`),
+    section('Balasan AI', 'AI merespons pesan pelanggan kapan pun selama WhatsApp dan AI Agent aktif.', '<p class="hint">Jumlah balasan tidak dibatasi dan pesan gagal akan dicoba kembali setelah koneksi pulih.</p>'),
     section('Ekspedisi Cek Ongkir', 'Ekspedisi yang dipakai saat menghitung ongkir.', `
       <div class="checks">${['JNE', 'J&T Express', 'SiCepat', 'AnterAja', 'POS Indonesia', 'TIKI', 'Ninja Xpress'].map(name => `<label class="check"><input type="checkbox" name="courier" value="${esc(name)}">${esc(name)}</label>`).join('')}</div>
       <div class="section-actions"><button class="button" data-save-shipping>Simpan Ekspedisi</button><p role="status" id="shipping-result" class="hint"></p></div>`),
     section('Ongkir Manual dari PDF', 'Unggah daftar tarif per kecamatan untuk dipakai sebagai sumber perhitungan.', `<div class="manual-shipping-card"><div class="switch-row manual-priority"><div class="switch-copy"><strong>Prioritaskan tarif manual</strong><span>Jika kecamatan pembeli ada di daftar, AI memakai tarif ini. Jika tidak ada, tetap cek RajaOngkir.</span></div><label class="switch"><input id="set-manual-shipping-priority" type="checkbox"><span class="track"></span></label></div><label class="field full">File tarif ongkir PDF<input id="shipping-pdf" type="file" accept="application/pdf,.pdf"><span class="hint">Format: Kecamatan / Kabupaten → tarif. Maksimal ${MAX_SHIPPING_PDF_BYTES.toLocaleString('id-ID')} byte (sekitar 1 MB).</span></label><p id="shipping-pdf-current" class="shipping-pdf-current">Belum ada PDF ongkir tersimpan.</p><div class="section-actions"><button class="button" data-save-shipping-pdf>Simpan PDF Ongkir</button><p role="status" id="shipping-pdf-result" class="hint"></p></div></div>`),
     section('Pesan Masuk', 'Atur perilaku saat pesan pelanggan masuk.', `<div class="switch-row"><div class="switch-copy"><strong>Aktifkan balasan otomatis</strong><span>AI Agent akan merespons pesan ketika konfigurasi sudah aktif.</span></div><label class="switch"><input id="set-auto-reply" type="checkbox"><span class="track"></span></label></div><div class="switch-row"><div class="switch-copy"><strong>Simpan riwayat pesan</strong><span>Pesan disimpan untuk Kotak Masuk dan analitik.</span></div><label class="switch"><input id="set-save-history" type="checkbox" checked><span class="track"></span></label></div><div class="section-actions"><button class="button" data-save-inbox>Simpan Pengaturan</button><p role="status" id="inbox-result" class="hint"></p></div>`),
-    section('Pengaturan Pengiriman', 'Atur batas dan perilaku pengiriman pesan massal.', `<div class="form-grid"><label class="field">Batas pesan per hari<input id="set-daily-limit" type="number" min="0" value="100"></label><label class="field">Mode pengiriman<select id="set-send-mode"><option>Aman (bertahap)</option><option>Normal</option></select></label></div><p class="hint">Gunakan interval acak dan batas harian untuk menjaga kualitas pengiriman WhatsApp.</p>`),
+    section('Pengaturan Pengiriman', 'Atur jeda dan perilaku balasan otomatis WhatsApp.', `<label class="field">Mode pengiriman<select id="set-send-mode"><option>Aman (bertahap)</option><option>Normal</option></select></label><p class="hint">Balasan AI inbox tidak dibatasi jumlahnya. Atur jeda antarbalasan untuk menjaga ritme percakapan.</p>`),
   ].join('');
   loadSettings();
 }
@@ -59,12 +59,8 @@ async function loadSettings() {
     document.querySelector('#set-min').value = settings.minInterval;
     document.querySelector('#set-max').value = settings.maxInterval;
     document.querySelector('#set-rotation').value = settings.rotation;
-    document.querySelector('#set-schedule-enabled').checked = Boolean(settings.scheduleEnabled);
-    document.querySelector('#set-schedule-start').value = settings.scheduleStart || '08:00';
-    document.querySelector('#set-schedule-end').value = settings.scheduleEnd || '21:00';
     document.querySelector('#set-auto-reply').checked = Boolean(settings.autoReply);
     document.querySelector('#set-save-history').checked = settings.saveHistory !== false;
-    document.querySelector('#set-daily-limit').value = settings.dailyLimit ?? 100;
     document.querySelector('#set-send-mode').value = settings.sendMode || 'Aman (bertahap)';
     document.querySelector('#set-manual-shipping-priority').checked = settings.manualShippingPriority !== false;
     for (const box of document.querySelectorAll('input[name=courier]')) box.checked = (settings.couriers || []).includes(box.value);
@@ -280,10 +276,6 @@ content.addEventListener('click', async event => {
           minInterval: Number(document.querySelector('#set-min').value),
           maxInterval: Number(document.querySelector('#set-max').value),
           rotation: document.querySelector('#set-rotation').value,
-          scheduleEnabled: document.querySelector('#set-schedule-enabled').checked,
-          scheduleStart: document.querySelector('#set-schedule-start').value,
-          scheduleEnd: document.querySelector('#set-schedule-end').value,
-          dailyLimit: Number(document.querySelector('#set-daily-limit').value),
           sendMode: document.querySelector('#set-send-mode').value,
           autoReply: document.querySelector('#set-auto-reply').checked,
           saveHistory: document.querySelector('#set-save-history').checked,

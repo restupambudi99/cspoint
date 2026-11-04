@@ -39,7 +39,7 @@ export function openStore(path) {
         scheduleEnabled: stored.scheduleEnabled === 'true',
         scheduleStart: stored.scheduleStart || '08:00',
         scheduleEnd: stored.scheduleEnd || '21:00',
-        dailyLimit: int(stored.dailyLimit, 100),
+        dailyLimit: int(stored.dailyLimit, 0),
         sendMode: stored.sendMode || 'Aman (bertahap)',
         autoReply: stored.autoReply === 'true',
         saveHistory: stored.saveHistory !== 'false',

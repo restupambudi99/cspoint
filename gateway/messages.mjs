@@ -46,6 +46,7 @@ export function openMessages(path) {
         (SELECT rowid AS sequence,* FROM messages WHERE jid=? ORDER BY timestamp DESC,rowid DESC LIMIT 200) m
         LEFT JOIN message_status s ON s.jid=m.jid AND s.id=m.id ORDER BY m.timestamp,m.sequence`).all(jid);
     },
+    byId(messageId) { return db.prepare('SELECT id,jid,name,text,outgoing,timestamp FROM messages WHERE id=?').get(messageId); },
     readKeys(jid, ids) {
       requireConversation(jid);
       if (!Array.isArray(ids) || ids.length > 200 || ids.some(id => typeof id !== 'string' || id.length > 200)) throw invalid('Daftar pesan tidak valid.');
