@@ -11,8 +11,10 @@ export function createAutoReply({ store, config, router, messages, buildMessages
       if (!config.claimReply(message.id, dayInJakarta(now()), 0)) return;
       try {
         try { await connection.markRead?.(message); } catch {}
-        const knowledge = store.knowledge.relevant(message.text);
-        const prompt = buildMessages(agent, messages.thread(message.jid), store.products.list(), knowledge);
+        const thread = messages.thread(message.jid);
+        const knowledgeQuery = thread.filter(item => !item.outgoing).slice(-4).map(item => item.text).join('\n');
+        const knowledge = store.knowledge.relevant(knowledgeQuery || message.text);
+        const prompt = buildMessages(agent, thread, store.products.list(), knowledge);
         let text, error;
         for (let attempt = 0; attempt < 4; attempt++) {
           try { text = await router.complete(prompt); break; }
