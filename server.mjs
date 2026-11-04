@@ -12,6 +12,7 @@ import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
 import { createAutoReply } from './auto-reply.mjs';
 import { extractKnowledgePdf } from './pdf-knowledge.mjs';
 import { readConversation } from './read-receipts.mjs';
+import { normalizeWaPhone, resolveWaJid } from './phone.mjs';
 
 const token = process.env.GATEWAY_TOKEN;
 if (!token || token.length < 32) throw new Error('GATEWAY_TOKEN must contain at least 32 characters');
@@ -353,11 +354,16 @@ const server = createServer(async (req, res) => {
     if (method === 'POST' && path === '/send') {
       if (status !== 'connected' || !socket) { send(res, 409, { error: 'WhatsApp belum terhubung. Scan QR di Pengaturan.' }); return; }
       const body = await readJson(req, 200000);
-      const phone = String(body.phone || '').replace(/\D/g, '').replace(/^0/, '62');
+      const phone = normalizeWaPhone(body.phone);
       const text = typeof body.text === 'string' ? body.text.trim() : '';
-      if ((body.jid === undefined && !/^\d{8,15}$/.test(phone)) || !text || text.length > 4000) { send(res, 400, { error: 'Nomor atau pesan tidak valid' }); return; }
-      const jid = body.jid === undefined ? `${phone}@s.whatsapp.net` : body.jid;
-      if (body.jid !== undefined && (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid))) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
+      if (!text || text.length > 4000) { send(res, 400, { error: 'Pesan wajib diisi, maksimal 4.000 karakter.' }); return; }
+      let jid = body.jid;
+      if (jid === undefined) {
+        if (!phone) { send(res, 400, { error: 'Nomor WhatsApp tidak valid. Gunakan format 08xxx atau 628xxx.' }); return; }
+        try { jid = await resolveWaJid(socket, phone); }
+        catch { send(res, 502, { error: 'Gagal memeriksa nomor di WhatsApp. Coba lagi.' }); return; }
+        if (!jid) { send(res, 400, { error: 'Nomor tidak terdaftar di WhatsApp.' }); return; }
+      } else if (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid)) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
       const result = await socket.sendMessage(jid, { text });
       if (store.settings().saveHistory) messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now() });
       send(res, 200, { id: result.key.id, status: 'submitted' }); return;

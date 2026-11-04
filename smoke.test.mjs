@@ -96,7 +96,7 @@ try {
   result = await json('/orders', { method: 'POST', body: JSON.stringify({}) });
   assert.equal(result.code, 400);
 
-  result = await json('/orders', { method: 'POST', body: JSON.stringify({ customer: 'Budi', phone: '0812', total: 90000 }) });
+  result = await json('/orders', { method: 'POST', body: JSON.stringify({ customer: 'Budi', phone: '081234567890', total: 90000 }) });
   assert.equal(result.code, 200);
   assert.equal(result.body.status, 'Menunggu Bayar');
 

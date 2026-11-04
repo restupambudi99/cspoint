@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { rankKnowledge } from './pdf-knowledge.mjs';
+import { normalizeWaPhone } from './phone.mjs';
 
 const now = () => Date.now();
 const id = () => randomUUID();
@@ -20,7 +21,12 @@ export function openStore(path) {
   `);
   const knowledgeColumns = new Set(db.prepare('PRAGMA table_info(knowledge)').all().map(column => column.name));
   if (!knowledgeColumns.has('source_content')) db.exec("ALTER TABLE knowledge ADD COLUMN source_content TEXT NOT NULL DEFAULT ''");
-  const phone = value => String(value ?? '').replace(/\D/g, '').replace(/^0/, '62').slice(0, 15);
+  const phone = value => {
+    if (!String(value ?? '').trim()) return '';
+    const normalized = normalizeWaPhone(value);
+    if (!normalized) throw Object.assign(new Error('Nomor WhatsApp tidak valid. Gunakan format 08xxx atau 628xxx.'), { status: 400 });
+    return normalized;
+  };
 
   const text = (value, max) => String(value ?? '').trim().slice(0, max);
   const int = (value, fallback = 0) => {
@@ -96,7 +102,7 @@ export function openStore(path) {
       create(input = {}) {
         const customer = text(input.customer, 120);
         if (!customer) throw Object.assign(new Error('Nama pelanggan wajib diisi'), { status: 400 });
-        const row = { id: id(), customer, phone: text(input.phone, 20), status: text(input.status, 40) || 'Menunggu Bayar', total: Math.max(0, int(input.total)), note: text(input.note, 2000), created_at: now() };
+        const row = { id: id(), customer, phone: phone(input.phone), status: text(input.status, 40) || 'Menunggu Bayar', total: Math.max(0, int(input.total)), note: text(input.note, 2000), created_at: now() };
         db.prepare('INSERT INTO orders VALUES (?,?,?,?,?,?,?)').run(row.id, row.customer, row.phone, row.status, row.total, row.note, row.created_at);
         return row;
       },
