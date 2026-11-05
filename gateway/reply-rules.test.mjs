@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { CLOSING_LINE, allowedAmounts, checkReply, customerFacts, customerWords, fallbackReply, finalizeReply, moneyAmounts, orderState } from './reply-rules.mjs';
+import { CLOSING_LINE, allowedAmounts, checkReply, customerFacts, customerWords, fallbackReply, finalizeReply, moneyAmounts, orderState, packageCatalog } from './reply-rules.mjs';
 
 assert.deepEqual(moneyAmounts('Paket 2 Rp149.000 + ongkir 65rb = Rp 214.000, isi 40 pcs, 1.000 pcs'), [149000, 214000, 65000]);
 
@@ -20,6 +20,13 @@ const foreign = checkReply('Saya rangkum ya Kak:\nNama: Fenkris\nAlamat: Desa Bi
 assert.equal(foreign.length, 2, 'a name and address from another lead are rejected');
 assert.equal(checkReply('Semua paket ready stock ya kak.', rules('halo')).length, 1, 'a stock claim without stock data is rejected');
 assert.deepEqual(checkReply('Stok masih ada kak.', { ...rules('halo'), stockKnown: true }), []);
+const packages = packageCatalog(instructions);
+assert.deepEqual([...packages], [['1', { pcs: 20, price: 99000 }], ['2', { pcs: 40, price: 149000 }], ['3', { pcs: 50, price: 199000 }]]);
+assert.equal(checkReply('Paket 1: 15 pcs - Rp99.000\nPaket 2: 30 pcs - Rp149.000', { ...rules('halo'), packages }).length, 2, 'invented package contents are rejected');
+assert.equal(checkReply('Paket 1 isi 20 pcs Rp149.000', { ...rules('halo'), packages }).length, 1, 'a price from another package is rejected');
+const packageRules = { ...rules('halo'), packages, amounts: { ...rules('halo').amounts, allowed: new Set([...rules('halo').amounts.allowed, 3725]) } };
+assert.deepEqual(checkReply('Paket 1 isi 20 pcs Rp99.000, Paket 2 isi 40 pcs Rp149.000 (Rp3.725/pcs), Paket 3 isi 50 pcs Rp199.000.', packageRules), []);
+assert.deepEqual(checkReply('Total Paket 2 + ongkir Rp65.000 = Rp214.000.', { ...packageRules, shipping: { ...shipping, final: true } }), [], 'a total line may combine a package price with the final tariff');
 assert.deepEqual(checkReply('Nama penerima: Anus\nAlamat: RT 6 RW 3 Negeri Hative Kecil, Kec. Sirimau, Kota Ambon, Maluku\nNama lengkap: [nama lengkap]', rules('ya')), []);
 
 const confirmation = { text: 'Apakah paket, alamat, dan total bayarnya sudah benar, kak? Kalau sudah, boleh balas YA PESAN.', outgoing: true };

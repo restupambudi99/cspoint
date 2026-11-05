@@ -98,8 +98,37 @@ export function customerWords(customerMessages, shipping = {}) {
   return new Set(words([...customerMessages.map(item => item.text), shipping.destination, shipping.province].filter(Boolean).join(' ')));
 }
 
-export function checkReply(reply, { amounts, shipping = {}, latestCustomerText = '', knownWords = new Set(), stockKnown = false }) {
+// "Paket 2: 40 pcs - Rp149.000" in the instructions or catalog defines each package.
+export function packageCatalog(...texts) {
+  const packages = new Map();
+  for (const text of texts) {
+    for (const match of String(text ?? '').matchAll(/paket\s*([1-9])\s*[:\-–—(]?\s*(?:isi\s*)?(\d{1,4})\s*pcs\s*\)?\s*[-–—:=,]?\s*(?:harga\s*)?(rp\.?\s*\d{1,3}(?:[.,]\d{3})+)?/gi)) {
+      if (!packages.has(match[1])) packages.set(match[1], { pcs: Number(match[2]), price: match[3] ? moneyAmounts(match[3])[0] : undefined });
+    }
+  }
+  return packages;
+}
+
+function packageProblems(reply, packages) {
   const problems = [];
+  for (const line of String(reply).split('\n')) {
+    for (const part of line.split(/(?=\bpaket\s*[1-9]\b)/i)) {
+      const number = part.match(/^paket\s*([1-9])\b/i)?.[1];
+      const known = number && packages.get(number);
+      if (!known) continue;
+      const description = 'Paket ' + number + ' berisi ' + known.pcs + ' pcs' + (known.price ? ' dengan harga ' + formatRupiah(known.price) : '') + ' menurut instruksi. Jangan menulis isi atau harga paket yang berbeda.';
+      const pcs = part.match(/(\d{1,4})\s*pcs/i);
+      const price = moneyAmounts(part.replace(/rp\.?\s*[\d.,]+\s*(?:\/|per)\s*pcs/gi, ''))[0];
+      const wrongPrice = known.price !== undefined && price !== undefined && price !== known.price && !/total|ongkir|\+|=/i.test(part);
+      if ((pcs && Number(pcs[1]) !== known.pcs) || wrongPrice) problems.push(description);
+    }
+  }
+  return [...new Set(problems)];
+}
+
+export function checkReply(reply, { amounts, shipping = {}, latestCustomerText = '', knownWords = new Set(), stockKnown = false, packages = new Map() }) {
+  const problems = [];
+  problems.push(...packageProblems(reply, packages));
   if (!stockKnown && STOCK_CLAIM.test(reply)) problems.push('Tidak ada data stok di katalog atau instruksi. Jangan menulis klaim stok seperti "ready stock", "stok tersedia", atau "stok terbatas".');
   const mentioned = moneyAmounts(reply);
   const invented = mentioned.filter(value => !amounts.allowed.has(value));

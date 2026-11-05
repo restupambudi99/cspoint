@@ -52,7 +52,8 @@ model sebagai status tersendiri.
 Setiap draf diperiksa sebelum dikirim: nominal harus ada di instruksi, katalog,
 Knowledge, tarif, atau pesan pelanggan (termasuk total harga paket + ongkir);
 ongkir harus sama dengan tarif sistem; Nama/Alamat/Patokan harus pernah ditulis
-pelanggan di chat itu. Draf yang gagal dibuat ulang sekali dengan daftar
+pelanggan di chat itu; isi pcs dan harga tiap Paket harus sama dengan instruksi;
+klaim stok ditolak bila katalog tidak mencatat stok. Draf yang gagal dibuat ulang sekali dengan daftar
 perbaikan, lalu diganti balasan aman bila tetap gagal. Permintaan kode pos
 dihapus, ucapan terima kasih serta doa "sehat selalu untuk Kakak dan keluarga"
 hanya dikirim setelah pelanggan mengonfirmasi (misalnya YA PESAN), dan Uji

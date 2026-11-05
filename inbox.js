@@ -55,6 +55,7 @@
     let labels = [];
     let labelTarget = '';
     let refreshing = false;
+    let refreshFailed = false;
     let reading = null;
     const dialog = root.querySelector('#inbox-label-dialog');
     const labelForm = dialog.querySelector('#label-form');
@@ -120,7 +121,7 @@
       else if (!agent.instructions?.trim()) aiStatus.textContent = 'Instruksi Agent belum tersimpan. Simpan instruksi di menu AI Agent sebelum mengaktifkan balasan.';
       else if (settings.autoReply && whatsapp.aiReplyFailure) aiStatus.textContent = `Balasan terakhir gagal: ${whatsapp.aiReplyFailure.message}`;
       else if (settings.autoReply && whatsapp.status !== 'connected') aiStatus.textContent = 'Mode AI aktif; balasan berjalan saat WhatsApp terhubung.';
-      else if (settings.autoReply) aiStatus.textContent = 'AI aktif. Balasan memakai instruksi dan Knowledge PDF; batas jadwal/kuota mengikuti Pengaturan.';
+      else if (settings.autoReply) aiStatus.textContent = 'AI aktif. Balasan memakai instruksi, Knowledge PDF, dan tarif ongkir; jam operasional mengikuti Pengaturan.';
       else aiStatus.textContent = 'AI nonaktif. Anda membalas pesan secara manual.';
     };
 
@@ -282,7 +283,9 @@
         drawList();
         if (selected) await drawThread();
         if (Date.now() - lastAiCheck > 30000) await loadAiMode();
-      } catch (error) { feedback.textContent = error.message; }
+        // A refresh error during a gateway restart should not stay on screen once data loads again.
+        if (refreshFailed) { feedback.textContent = ''; refreshFailed = false; }
+      } catch (error) { feedback.textContent = error.message; refreshFailed = true; }
       finally { refreshing = false; if (panel.isConnected) timer = setTimeout(refresh, 5000); }
     }
 

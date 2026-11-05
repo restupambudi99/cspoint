@@ -1,4 +1,4 @@
-import { allowedAmounts, checkReply, customerFacts, customerWords, fallbackReply, finalizeReply, orderState } from './reply-rules.mjs';
+import { allowedAmounts, checkReply, customerFacts, customerWords, fallbackReply, finalizeReply, orderState, packageCatalog } from './reply-rules.mjs';
 
 async function complete(router, prompt, { attempts, sleep, active }) {
   let error;
@@ -26,6 +26,7 @@ export async function composeReply({ store, router, buildMessages, agent, thread
     latestCustomerText: customer.at(-1)?.text || '',
     knownWords: customerWords(customer, shipping),
     stockKnown: products.some(product => Number(product.stock) > 0) || /ready\s*stoc?k|stok\s+(?:selalu\s+)?(?:ready|tersedia|ada)/i.test(agent.instructions || ''),
+    packages: packageCatalog(agent.instructions, ...products.flatMap(product => [product.price, product.description])),
   };
   const first = await complete(router, buildMessages(agent, thread, products, references, memory, context), { attempts, sleep, active });
   if (!first.text) return { text: null, error: first.error, context, guarded: false, problems: [] };
