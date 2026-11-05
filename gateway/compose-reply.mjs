@@ -25,6 +25,7 @@ export async function composeReply({ store, router, buildMessages, agent, thread
     shipping,
     latestCustomerText: customer.at(-1)?.text || '',
     knownWords: customerWords(customer, shipping),
+    stockKnown: products.some(product => Number(product.stock) > 0) || /ready\s*stoc?k|stok\s+(?:selalu\s+)?(?:ready|tersedia|ada)/i.test(agent.instructions || ''),
   };
   const first = await complete(router, buildMessages(agent, thread, products, references, memory, context), { attempts, sleep, active });
   if (!first.text) return { text: null, error: first.error, context, guarded: false, problems: [] };

@@ -18,6 +18,8 @@ assert.ok(checkReply('Maaf Kak, ongkir belum tersedia, admin cek dulu ya.', rule
 assert.ok(checkReply('Ongkir Rp65.000.\nTotal bayar COD Rp214.000.', rules('total')).some(problem => problem.includes('total final')), 'no final total while the PDF marks the area for admin review');
 const foreign = checkReply('Saya rangkum ya Kak:\nNama: Fenkris\nAlamat: Desa Binaus, Mollo Tengah', rules('ya'));
 assert.equal(foreign.length, 2, 'a name and address from another lead are rejected');
+assert.equal(checkReply('Semua paket ready stock ya kak.', rules('halo')).length, 1, 'a stock claim without stock data is rejected');
+assert.deepEqual(checkReply('Stok masih ada kak.', { ...rules('halo'), stockKnown: true }), []);
 assert.deepEqual(checkReply('Nama penerima: Anus\nAlamat: RT 6 RW 3 Negeri Hative Kecil, Kec. Sirimau, Kota Ambon, Maluku\nNama lengkap: [nama lengkap]', rules('ya')), []);
 
 const confirmation = { text: 'Apakah paket, alamat, dan total bayarnya sudah benar, kak? Kalau sudah, boleh balas YA PESAN.', outgoing: true };

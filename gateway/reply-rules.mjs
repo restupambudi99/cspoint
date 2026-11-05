@@ -13,6 +13,7 @@ const CONFIRM_REQUEST = /ya pesan|sudah benar|sudah sesuai|apakah[^?\n]{0,120}(?
 const AFFIRMATION = /^(ya|iya+|yaa+|y|yes|ok+|oke+|okey|okay|benar|betul|bener|sesuai|siap|lanjut|lanjutkan|setuju|jadi|gas|mantap|boleh|sip|sudah|udah|sdh|yup|yap|deal)\b/;
 const NEGATION = /\b(tidak|tdk|gak|ga|nggak|enggak|engga|ngga|bukan|salah|ganti|ubah|tapi|tp|batal|cancel|belum|blm|kurang|revisi|koreksi|tunggu|nanti)\b/;
 const EARLY_CLOSING = /sehat selalu|saya doakan|doakan (?:kakak|kak|semoga)|terima kasih[^\n]{0,40}(?:sudah|telah) (?:order|pesan|memesan|berbelanja|belanja)/i;
+const STOCK_CLAIM = /ready\s*stoc?k|stok(?:nya)?\s+(?:masih\s+|selalu\s+)?(?:ada|tersedia|ready|banyak|melimpah|terbatas|habis|menipis|tinggal|kosong)/i;
 
 const fieldKey = label => /^nama/i.test(label) ? 'name' : /^alamat/i.test(label) ? 'address' : 'landmark';
 const fieldLabel = { name: 'Nama', address: 'Alamat', landmark: 'Patokan' };
@@ -97,8 +98,9 @@ export function customerWords(customerMessages, shipping = {}) {
   return new Set(words([...customerMessages.map(item => item.text), shipping.destination, shipping.province].filter(Boolean).join(' ')));
 }
 
-export function checkReply(reply, { amounts, shipping = {}, latestCustomerText = '', knownWords = new Set() }) {
+export function checkReply(reply, { amounts, shipping = {}, latestCustomerText = '', knownWords = new Set(), stockKnown = false }) {
   const problems = [];
+  if (!stockKnown && STOCK_CLAIM.test(reply)) problems.push('Tidak ada data stok di katalog atau instruksi. Jangan menulis klaim stok seperti "ready stock", "stok tersedia", atau "stok terbatas".');
   const mentioned = moneyAmounts(reply);
   const invented = mentioned.filter(value => !amounts.allowed.has(value));
   if (invented.length) problems.push('Nominal ' + invented.map(formatRupiah).join(', ') + ' tidak ada di instruksi, katalog, Knowledge PDF, atau STATUS PERCAKAPAN. Jangan menulis nominal yang tidak tercantum; total hanya harga paket + ongkir.');
@@ -143,7 +145,8 @@ function dropPostalCodeRequests(text) {
 export function finalizeReply(text, { order = {} } = {}) {
   let reply = String(text ?? '').trim()
     .replace(/\*\*(.+?)\*\*/gs, '*$1*')
-    .replace(/^#{1,6}\s+/gm, '');
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/[ \t]+$/gm, '');
   reply = dropPostalCodeRequests(reply);
   if (order.confirmedNow) {
     if (!/terima kasih/i.test(reply) || !/sehat selalu/i.test(reply)) reply += '\n\n' + CLOSING_LINE;
