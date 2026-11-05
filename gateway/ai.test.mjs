@@ -21,7 +21,7 @@ legacyDb.prepare('INSERT INTO ai_reply_claims VALUES (?,?)').run('legacy-replied
 legacyDb.prepare('INSERT INTO messages VALUES (?,?,?,?,?,?)').run('legacy-replied', 'customer@s.whatsapp.net', '', 'halo', 0, legacyTime - 5000);
 legacyDb.prepare('INSERT INTO messages VALUES (?,?,?,?,?,?)').run('outgoing-reply', 'customer@s.whatsapp.net', '', 'Halo kak', 1, legacyTime - 4000);
 const legacyConfig = openAiConfig(legacyPath, secret);
-assert.deepEqual(legacyConfig.pendingReplies(), ['legacy-failed'], 'recent messages that failed before migration are requeued');
+assert.deepEqual(legacyConfig.pendingReplies(), [{ instance: 'default', messageId: 'legacy-failed' }], 'recent messages that failed before migration are requeued');
 legacyConfig.close(); legacyDb.close();
 let config = openAiConfig(path, secret), calls = 0, reject = false, missingModel = false, lastPayload;
 const server = createServer(async (req, res) => {
@@ -34,13 +34,15 @@ const server = createServer(async (req, res) => {
   for await (const chunk of req) raw += chunk;
   lastPayload = JSON.parse(raw);
   calls++;
-  res.end(JSON.stringify({ choices: [{ message: { content: 'Halo, saya CSPoint. Ada yang bisa dibantu?' } }] }));
+  const content = /ongkir/i.test(lastPayload.messages.at(-1)?.content || '') ? 'Ongkir ke Bubon Rp40.000 ya Kak. Kakak mau ambil paket berapa?' : 'Halo, saya CSPoint. Ada yang bisa dibantu?';
+  res.end(JSON.stringify({ choices: [{ message: { content } }] }));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 let router = createRouterClient(config, { baseUrl: `http://127.0.0.1:${server.address().port}/v1` });
 const store = openStore(':memory:'), messages = openMessages(':memory:');
 store.saveSettings({ shippingPdfName: 'Tarif ongkir.pdf', shippingPdfText: 'Bubon / Aceh Barat → Rp40.000' });
-assert.match(store.knowledge.relevant('Berapa ongkir ke Kecamatan Bubon?')[0].content, /Bubon \/ Aceh Barat → Rp40\.000/);
+assert.equal(store.knowledge.shipping([{ text: 'Berapa ongkir ke Kecamatan Bubon?', outgoing: false }]).amount, 'Rp40.000');
+assert.deepEqual(store.knowledge.relevant('Berapa ongkir ke Kecamatan Bubon?'), [], 'tariff rows are resolved in code, not passed as loose PDF excerpts');
 try {
   assert.equal(config.publicConfig().hasApiKey, false);
   assert.equal(config.publicConfig().model, 'Hermesollama');
@@ -59,7 +61,7 @@ try {
   assert.throws(() => config.save({ model: '' }), /tidak valid/);
   assert.equal(config.claimReply('queued-message', '2026-11-04', 0), true);
   config.deferReply('queued-message');
-  assert.deepEqual(config.pendingReplies(), ['queued-message'], 'failed replies remain queued for reconnect');
+  assert.deepEqual(config.pendingReplies(), [{ instance: 'default', messageId: 'queued-message' }], 'failed replies remain queued for reconnect');
   assert.equal(config.claimReply('queued-message', '2026-11-04', 0), true, 'pending replies can be retried');
   config.finishReply('queued-message');
   assert.deepEqual(config.pendingReplies(), []);
@@ -101,7 +103,7 @@ try {
   assert.equal(sent.length, 1);
   assert.deepEqual(reads, [inbound.id], 'enabled AI acknowledges the incoming message before replying');
   assert.equal(delays.length, 0, 'first reply has no artificial interval delay');
-  assert.match(lastPayload.messages[0].content, /Bubon \/ Aceh Barat → Rp40\.000/, 'shipping PDF tariff is included in the AI context');
+  assert.match(lastPayload.messages[0].content, /Ongkir: Bubon, Aceh Barat = Rp40\.000/, 'the verified tariff is included in the AI context');
   assert.match(lastPayload.messages[0].content, /Arahkan percakapan sampai closing/);
   assert.equal(messages.thread(inbound.jid).at(-1).outgoing, 1);
   const afterReply = calls;
@@ -123,16 +125,17 @@ try {
   assert.equal(sent.length, sentBeforeCancelledReply, 'disconnect during interval wait cancels the send');
   current = true;
   store.saveSettings({ scheduleEnabled: true, scheduleStart: '08:00', scheduleEnd: '09:00' });
-  const scheduledReply = createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {}, now: () => new Date('2026-11-04T05:00:00Z') });
   const beforeSchedule = calls;
-  await scheduledReply({ ...inbound, id: 'in-5' }, connection);
-  assert.equal(calls, beforeSchedule + 1, 'AI inbox replies are not suppressed by operating hours');
+  await createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {}, now: () => new Date('2026-11-04T05:00:00Z') })({ ...inbound, id: 'in-5' }, connection);
+  assert.equal(calls, beforeSchedule, 'the Waktu Operasional switch pauses AI replies outside its hours');
+  await createAutoReply({ store, config, router, messages, buildMessages: buildAiMessages, onError, sleep: async () => {}, now: () => new Date('2026-11-04T01:30:00Z') })({ ...inbound, id: 'in-5b' }, connection);
+  assert.equal(calls, beforeSchedule + 1, 'AI replies inside operating hours');
 
   store.saveSettings({ scheduleEnabled: false, dailyLimit: 0 });
   let retryCalls = 0, retrySent = 0, retryDelay = 0;
   const retryReply = createAutoReply({
     store, config, messages, buildMessages: buildAiMessages,
-    router: { complete: async () => { if (++retryCalls < 3) throw Object.assign(new Error('temporary upstream error'), { status: 502 }); return 'Tarif ditemukan.'; } },
+    router: { complete: async () => { if (++retryCalls < 3) throw Object.assign(new Error('temporary upstream error'), { status: 502 }); return 'Ongkir ke Bubon Rp40.000 ya Kak.'; } },
     sleep: async ms => { retryDelay = ms; },
     onError: error => { throw error; },
     now: () => simulatedNow,
@@ -149,15 +152,16 @@ try {
     sleep: async () => {}, onError: error => { fallbackFailure = error; }, now: () => simulatedNow,
   });
   await fallbackReply({ ...inbound, id: 'in-7' }, { isCurrent: () => true, send: async (_jid, payload) => { fallbackSent = payload.text; return { key: { id: 'out-fallback' } }; } });
-  assert.match(fallbackSent, /saya bantu cek dan lanjutkan pesanan/i, 'a model outage still gets a helpful WhatsApp reply');
+  assert.match(fallbackSent, /Ongkir ke Bubon, Aceh Barat Rp40\.000/, 'a model outage still answers the shipping question from the PDF');
+  assert.match(fallbackSent, /nama lengkap penerima/, 'the outage reply keeps collecting closing data');
   assert.equal(fallbackFailure.fallbackSent, true, 'fallback delivery is visible in gateway health');
 
   const longInstruction = `Panduan layanan pelanggan\n${'Aturan toko yang sudah disetujui.\n'.repeat(300)}\nJika pelanggan bertanya total Paket 3, jangan mengarang; pastikan harga dan jumlah.\n`;
   const contextMessages = buildAiMessages({ assistantName: 'CSPoint', instructions: longInstruction }, [{ text: 'Saya pesan Paket 3, 50 pcs. Total berapa?', outgoing: false }], Array.from({ length: 8 }, (_, index) => ({ name: index === 7 ? 'Paket 3' : `Barang ${index}`, sku: '', description: 'produk', price: 10000 + index, stock: 1 })), Array.from({ length: 5 }, (_, index) => ({ name: `Referensi ${index}`, content: 'tarif'.repeat(500) })));
   assert.ok(contextMessages[0].content.includes('Jika pelanggan bertanya total Paket 3'), 'relevant instructions are retrieved even when they are at the end');
-  assert.ok(contextMessages[0].content.length < 7000, 'catalog, PDF and relevant admin context fit the model window');
+  assert.ok(contextMessages[0].content.length < 20000, 'catalog, PDF and admin context stay within the prompt budget');
   assert.match(contextMessages[0].content, /"name":"Paket 3"/, 'catalog context prioritizes the product named in the order');
-  console.log('PASS: encrypted key persistence/redaction, 9Router auth/models/completions, uncapped replies, schedule independence, history, retries, reconnect cancellation and sales context');
+  console.log('PASS: encrypted key persistence/redaction, 9Router auth/models/completions, uncapped replies, operating-hours switch, history, retries, reconnect cancellation and sales context');
 } finally {
   config.close(); store.close(); messages.close();
   server.closeAllConnections();

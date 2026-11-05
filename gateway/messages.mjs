@@ -31,15 +31,8 @@ export function openMessages(path) {
     CREATE TABLE IF NOT EXISTS message_status_scoped (instance TEXT NOT NULL,jid TEXT NOT NULL,id TEXT NOT NULL,status INTEGER NOT NULL,PRIMARY KEY(instance,jid,id));
     CREATE TABLE IF NOT EXISTS conversation_labels_scoped (instance TEXT NOT NULL,jid TEXT NOT NULL,label_id TEXT NOT NULL REFERENCES inbox_labels(id) ON DELETE CASCADE,PRIMARY KEY(instance,jid,label_id));
     CREATE TABLE IF NOT EXISTS conversation_memory_scoped (instance TEXT NOT NULL,jid TEXT NOT NULL,entries TEXT NOT NULL DEFAULT '[]',updated_at INTEGER NOT NULL,PRIMARY KEY(instance,jid));
+    CREATE TABLE IF NOT EXISTS lead_sources (instance TEXT NOT NULL,jid TEXT NOT NULL,title TEXT NOT NULL DEFAULT '',body TEXT NOT NULL DEFAULT '',source_url TEXT NOT NULL DEFAULT '',updated_at INTEGER NOT NULL,PRIMARY KEY(instance,jid));
     CREATE INDEX IF NOT EXISTS messages_instance_jid_time ON messages(instance,jid,timestamp);`);
-  if (!db.prepare('SELECT 1 FROM inbox_meta WHERE key=?').get('legacy-memory-cleared')) {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      db.exec(`DELETE FROM conversation_memory;
-        INSERT INTO inbox_meta VALUES ('legacy-memory-cleared');
-        COMMIT;`);
-    } catch (error) { db.exec('ROLLBACK'); throw error; }
-  }
   // Rebuild memory only from messages within the same WhatsApp number and lead.
   // The old JID-only memory may have merged messages from multiple numbers, so it is never copied.
   const missingMemories = db.prepare(`SELECT DISTINCT m.instance,m.jid FROM messages m LEFT JOIN conversation_memory_scoped c
@@ -65,6 +58,17 @@ export function openMessages(path) {
         SELECT m.instance,m.jid,c.label_id FROM conversation_labels c JOIN messages m ON m.jid=c.jid
         WHERE m.instance=(SELECT latest.instance FROM messages latest WHERE latest.jid=m.jid ORDER BY latest.timestamp DESC,latest.rowid DESC LIMIT 1);
         INSERT INTO inbox_meta VALUES ('legacy-labels-scoped');
+        COMMIT;`);
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  // Manual unread marks were keyed by customer only; keep them on the number the customer wrote to last.
+  if (!db.prepare('SELECT 1 FROM inbox_meta WHERE key=?').get('legacy-state-scoped')) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(`INSERT OR IGNORE INTO conversation_state_scoped(instance,jid,force_unread)
+        SELECT (SELECT latest.instance FROM messages latest WHERE latest.jid=s.jid ORDER BY latest.timestamp DESC,latest.rowid DESC LIMIT 1),s.jid,s.force_unread
+        FROM conversation_state s WHERE EXISTS (SELECT 1 FROM messages m WHERE m.jid=s.jid);
+        INSERT INTO inbox_meta VALUES ('legacy-state-scoped');
         COMMIT;`);
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
@@ -118,6 +122,12 @@ export function openMessages(path) {
         LEFT JOIN message_status_scoped s ON s.jid=m.jid AND s.instance=m.instance AND s.id=m.id ORDER BY m.timestamp,m.sequence`).all(jid, instance);
     },
     byId(messageId, instance) { return instance === undefined ? db.prepare('SELECT id,jid,name,text,outgoing,timestamp,instance FROM messages WHERE id=?').get(messageId) : db.prepare('SELECT id,jid,name,text,outgoing,timestamp,instance FROM messages WHERE id=? AND instance=?').get(messageId, instance); },
+    saveLeadSource({ instance = 'default', jid, title = '', body = '', sourceUrl = '' }) {
+      if (typeof jid !== 'string' || !jid) return;
+      db.prepare('INSERT INTO lead_sources VALUES (?,?,?,?,?,?) ON CONFLICT(instance,jid) DO UPDATE SET title=excluded.title,body=excluded.body,source_url=excluded.source_url,updated_at=excluded.updated_at')
+        .run(instance, jid, String(title ?? '').slice(0, 300), String(body ?? '').slice(0, 1000), String(sourceUrl ?? '').slice(0, 500), Date.now());
+    },
+    leadSource(jid, instance = 'default') { return db.prepare('SELECT title,body,source_url AS sourceUrl FROM lead_sources WHERE instance=? AND jid=?').get(instance, jid) || null; },
     memory(jid, instance = 'default') {
       const entries = db.prepare('SELECT entries FROM conversation_memory_scoped WHERE jid=? AND instance=?').get(jid, instance)?.entries;
       try { const parsed = JSON.parse(entries || '[]'); return Array.isArray(parsed) ? parsed.filter(entry => typeof entry?.text === 'string').slice(-12) : []; }

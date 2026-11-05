@@ -142,7 +142,18 @@ async function drawAgent() {
         <label class="check"><input id="agent-enabled" type="checkbox" ${agent.enabled ? 'checked' : ''}> Aktifkan AI Agent</label>
       </div>
       <div class="section-actions"><button class="button" data-save-agent>Simpan Agent</button><p role="status" id="agent-result" class="hint"></p></div>
-      <p class="hint">Balasan otomatis memakai instruksi, Knowledge PDF, serta memori ringkas hingga 12 pesan terakhir per pelanggan. AI memakai konteks tersimpan, bukan melatih model. Memori mengikuti pengaturan Simpan riwayat pesan agar AI bisa mengingat detail lama dan tidak menanyakannya ulang.</p>`;
+      <section class="ai-rules" aria-labelledby="ai-rules-title">
+        <h3 id="ai-rules-title">Aturan inti AI (selalu aktif)</h3>
+        <ul>
+          <li>Jawaban hanya bersumber dari Instruksi, Knowledge PDF, katalog produk, dan chat lead itu sendiri.</li>
+          <li>Ongkir dihitung sistem dari PDF tarif. AI tidak boleh menebak atau memakai tarif wilayah lain.</li>
+          <li>Nama, alamat, dan patokan hanya diambil dari chat lead tersebut. Memori setiap lead dan setiap nomor terpisah.</li>
+          <li>Data closing: nama lengkap, alamat lengkap, patokan rumah, dan paket. Kode pos tidak diminta.</li>
+          <li>Setelah lead membalas YA PESAN, AI berterima kasih dan mendoakan Kakak dan keluarga sehat selalu.</li>
+          <li>Balasan yang memuat nominal atau data di luar sumber ditolak dan diganti balasan aman.</li>
+        </ul>
+      </section>
+      <p class="hint">AI membaca hingga 16 pesan terakhir di chat lead tersebut setiap kali membalas. AI memakai konteks tersimpan, bukan melatih model. Memori mengikuti pengaturan Simpan riwayat pesan.</p>`;
   } catch (error) {
     panel.innerHTML = `<p class="empty">Gagal memuat agent: ${esc(error.message)}</p>`;
   }

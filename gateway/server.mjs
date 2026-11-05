@@ -9,6 +9,7 @@ import { openStore } from './store.mjs';
 import { mcpHandler } from './mcp.mjs';
 import { openAiConfig, createRouterClient, buildAiMessages } from './ai.mjs';
 import { createAutoReply } from './auto-reply.mjs';
+import { composeReply } from './compose-reply.mjs';
 import { extractKnowledgePdf } from './pdf-knowledge.mjs';
 import { readConversation } from './read-receipts.mjs';
 import { normalizeWaPhone, resolveWaJid } from './phone.mjs';
@@ -46,6 +47,8 @@ const autoReply = createAutoReply({ store, config: aiConfig, router: aiRouter, m
     console.error(`AI auto-reply failed (status=${code})`);
   },
   onSuccess: () => { autoReplyFailure = null; },
+  // Drafts with invented prices, wrong shipping or another lead's data are replaced before sending.
+  onGuard: count => { console.warn('AI draft rejected by reply rules (problems=' + count + ')'); },
 });
 const live = (number, current) => number.socket === current && number.status === 'connected';
 const replyTo = (number, current, message) => autoReply({ ...message, instance: number.id }, { isCurrent: () => live(number, current), send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, live(number, current) ? current : null, item.jid, [item.id], number.id) });
@@ -63,6 +66,12 @@ const numbers = await openNumbers({
         const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
         if (!jid || !message.key?.id || !text || !/\@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
         const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now(), instance: number.id };
+        // Click-to-WhatsApp ads attach the ad to the first message; the AI uses it as the lead's context.
+        const context = message.message?.extendedTextMessage?.contextInfo;
+        const ad = context?.externalAdReply;
+        if (!saved.outgoing && ad && (ad.title || ad.body) && (ad.sourceType === 'ad' || ad.ctwaClid || ad.showAdAttribution || context.conversionSource || context.entryPointConversionSource)) {
+          messages.saveLeadSource({ instance: number.id, jid, title: ad.title, body: ad.body, sourceUrl: ad.sourceUrl });
+        }
         const fresh = store.settings().saveHistory ? messages.add(saved) : true;
         if (!saved.outgoing && !numbers.owns(jid) && Math.abs(Date.now() - saved.timestamp) < 120000) {
           void replyTo(number, current, fresh ? saved : messages.byId(saved.id, number.id));
@@ -72,9 +81,8 @@ const numbers = await openNumbers({
   },
   onOpen(number, current) {
     for (const pending of aiConfig.pendingReplies()) {
-      const id = typeof pending === 'string' ? pending : pending.message_id;
-      const instance = typeof pending === 'string' ? 'default' : pending.instance;
-      const message = instance === number.id ? messages.byId(id, number.id) : null;
+      if (pending.instance !== number.id) continue;
+      const message = messages.byId(pending.messageId, number.id);
       if (message && !message.outgoing) void replyTo(number, current, message);
     }
   },
@@ -277,8 +285,10 @@ const server = createServer(async (req, res) => {
       const input = await readJson(req, 12000);
       const prompt = input.prompt === undefined ? 'Jawab singkat: koneksi CSPoint berhasil.' : input.prompt;
       if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) { send(res, 400, { error: 'Pesan uji wajib diisi, maksimal 4.000 karakter.' }); return; }
-      const text = await aiRouter.complete(buildAiMessages(store.agent('default'), [{ text: prompt, outgoing: false }], store.products.list(), store.knowledge.relevant(prompt)));
-      send(res, 200, { reply: text, model: aiConfig.publicConfig().model }); return;
+      // Same pipeline and checks as a WhatsApp reply, for a one-message conversation.
+      const composed = await composeReply({ store, router: aiRouter, buildMessages: buildAiMessages, agent: store.agent('default'), thread: [{ id: 'ai-test', text: prompt, outgoing: false }], attempts: 1 });
+      if (!composed.text) throw composed.error || Object.assign(new Error('9Router tidak mengembalikan jawaban.'), { status: 502 });
+      send(res, 200, { reply: composed.text, model: aiConfig.publicConfig().model, guarded: composed.guarded }); return;
     }
 
     for (const name of ['products', 'orders', 'forms', 'knowledge', 'contacts', 'templates']) {

@@ -63,4 +63,17 @@ try {
   assert.equal(persisted.list()[0].labels[0].name, 'Retained');
   persisted.close();
 } finally { await rm(folder, { recursive: true, force: true }); }
+const scoped = openMessages(':memory:');
+const lead = '628111222333@s.whatsapp.net';
+scoped.add({ id: 'n1-in', jid: lead, name: 'Lead', text: 'Alamat: Kec. Sirimau, Kota Ambon', outgoing: false, timestamp: 1, instance: 'default' });
+scoped.add({ id: 'n2-in', jid: lead, name: 'Lead', text: 'Alamat: Kec. Bubon, Aceh Barat', outgoing: false, timestamp: 2, instance: 'n2' });
+assert.deepEqual(scoped.thread(lead, 'default').map(item => item.id), ['n1-in'], 'a thread never contains messages sent to another WhatsApp number');
+assert.deepEqual(scoped.memory(lead, 'n2').map(item => item.id), ['n2-in'], 'AI memory is kept per number and customer');
+assert.equal(scoped.list().length, 2, 'the same customer on two numbers is two conversations');
+scoped.markRead(lead, ['n1-in'], false, 'default');
+assert.deepEqual(Object.fromEntries(scoped.list().map(row => [row.instance, row.unreadCount])), { default: 0, n2: 1 });
+scoped.saveLeadSource({ instance: 'n2', jid: lead, title: 'Koyo Kaki', body: 'COD seluruh Indonesia' });
+assert.equal(scoped.leadSource(lead, 'n2').title, 'Koyo Kaki');
+assert.equal(scoped.leadSource(lead, 'default'), null, 'an ad context belongs to the number that received it');
+scoped.close();
 console.log('PASS: legacy migration, persisted unread/labels, customer names, real receipt keys, receipt retry and out-of-order delivery');

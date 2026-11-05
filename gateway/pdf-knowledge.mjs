@@ -45,29 +45,6 @@ export async function extractKnowledgePdf(base64) {
   }
 }
 
-export function matchShippingTariffs(query, documents) {
-  const stopWords = new Set(['ongkir', 'ongkos', 'tarif', 'biaya', 'kirim', 'pengiriman', 'berapa', 'kec', 'kecamatan', 'kab', 'kabupaten', 'kota', 'distrik', 'alamat', 'lengkap', 'jalan', 'jl', 'rt', 'rw', 'kel', 'kelurahan', 'desa', 'kampung', 'negeri', 'dusun', 'kode', 'pos', 'patokan', 'rumah', 'nomor', 'telepon', 'wa', 'nama', 'penerima', 'paket', 'pcs', 'total', 'cod', 'produk', 'harga', 'mau', 'ambil', 'ya', 'kak']);
-  const normalize = value => String(value ?? '').toLocaleLowerCase('id-ID').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const terms = [...new Set(normalize(query).match(/[\p{L}\p{N}]{3,}/gu) || [])].filter(term => !stopWords.has(term));
-  if (!terms.length) return [];
-  const matches = [];
-  for (const [documentIndex, document] of documents.entries()) {
-    for (const [lineIndex, line] of String(document.content ?? '').split(/\r?\n/).entries()) {
-      const row = line.trim().match(/^(.+?)\s*(?:→|->|=>)\s*(Rp\.?\s*\d[\d.,]*)\s*$/i);
-      if (!row) continue;
-      const destination = row[1].trim();
-      const district = normalize(destination.split('/')[0]);
-      const districtTerms = district.match(/[\p{L}\p{N}]{3,}/gu) || [];
-      const exact = terms.filter(term => districtTerms.includes(term));
-      if (!exact.length) continue;
-      const destinationTerms = normalize(destination).match(/[\p{L}\p{N}]{3,}/gu) || [];
-      const matchScore = (exact.length * 4) + terms.filter(term => destinationTerms.includes(term) && !exact.includes(term)).length;
-      matches.push({ type: 'shipping_tariff', name: document.name, destination, amount: row[2].replace(/\s+/g, ''), content: line.trim(), matchScore, documentIndex, lineIndex });
-    }
-  }
-  return matches.sort((a, b) => b.matchScore - a.matchScore || a.documentIndex - b.documentIndex || a.lineIndex - b.lineIndex).slice(0, 3).map(({ documentIndex, lineIndex, ...match }) => match);
-}
-
 export function rankKnowledge(query, documents, { limit = 5, chunkSize = 900, overlap = 140 } = {}) {
   const stopWords = new Set(['yang', 'dan', 'atau', 'untuk', 'dari', 'dengan', 'pada', 'adalah', 'ini', 'itu', 'saya', 'kami', 'anda', 'kak', 'tolong', 'bisa', 'berapa', 'apakah', 'bagaimana', 'mohon', 'ongkir', 'tarif', 'biaya', 'harga', 'kirim', 'pengiriman', 'ke', 'di', 'kecamatan', 'kec', 'kabupaten', 'kab', 'kota', 'distrik', 'nama', 'lengkap', 'penerima', 'alamat', 'alamatnya', 'jalan', 'jl', 'rt', 'rw', 'kel', 'kelurahan', 'desa', 'kampung', 'negeri', 'dusun', 'kode', 'pos', 'patokan', 'rumah', 'nomor', 'telepon', 'wa', 'produk', 'paket', 'pcs', 'total', 'cod', 'pembayaran', 'transfer', 'admin', 'cek', 'cekkan', 'info', 'informasi', 'ada', 'dalam', 'penerima', 'permisi', 'halo', 'nih', 'ya', 'dong', 'sih', 'minta', 'tolong', 'bantu', 'kasih', 'mau', 'ambil', 'berapa', 'ongkos', 'ongkirnya', 'ongkirnya']);
   const normalize = value => String(value ?? '').toLocaleLowerCase('id-ID').normalize('NFD').replace(/[\u0300-\u036f]/g, '');

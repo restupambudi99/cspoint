@@ -77,7 +77,7 @@ try {
   result = await json('/settings', { method: 'POST', body: JSON.stringify({ shippingPdfContent: 'x'.repeat(12000001) }) });
   assert.equal(result.code, 413);
   result = await json('/settings', { method: 'POST', body: JSON.stringify({ minInterval: 5, maxInterval: 1 }) });
-  assert.equal(result.body.maxInterval, 5, 'maxInterval must not drop below minInterval');
+  assert.equal(result.code, 400, 'maxInterval below minInterval is rejected');
 
   // Product create/list/delete against the real store.
   result = await json('/products', { method: 'POST', body: JSON.stringify({ name: 'Kaos Polos', sku: 'KP-01', price: 50000, stock: 7 }) });
@@ -96,7 +96,7 @@ try {
   result = await json('/orders', { method: 'POST', body: JSON.stringify({}) });
   assert.equal(result.code, 400);
 
-  result = await json('/orders', { method: 'POST', body: JSON.stringify({ customer: 'Budi', phone: '0812', total: 90000 }) });
+  result = await json('/orders', { method: 'POST', body: JSON.stringify({ customer: 'Budi', phone: '081234567890', total: 90000 }) });
   assert.equal(result.code, 200);
   assert.equal(result.body.status, 'Menunggu Bayar');
 
@@ -123,10 +123,10 @@ try {
   result = await json('/settings', { method: 'POST', body: '{bad json' });
   assert.equal(result.code, 400);
 
-  // Re-pairing must never run without the explicit confirmation token.
-  result = await json('/re-pair', { method: 'POST', body: JSON.stringify({}) });
+  // Disconnecting a number must never run without the explicit confirmation word.
+  result = await json('/disconnect', { method: 'POST', body: JSON.stringify({}) });
   assert.equal(result.code, 400);
-  assert.match(result.body.error, /PAIRING-ULANG/);
+  assert.match(result.body.error, /PUTUSKAN/);
 
   console.log('PASS: auth, idle status, unavailable QR, unknown route, send guard, settings/product/order/form/knowledge/agent persistence, validation');
 } finally {

@@ -23,20 +23,44 @@ harus dilindungi seperti kredensial lainnya.
 
 Alur otomatis memproses pesan teks chat pribadi, termasuk pelanggan baru dan
 lama; grup, pesan sendiri, dan sinkronisasi riwayat dikecualikan. Inbox AI tidak
-memakai batas jumlah balasan atau jam operasional. Antrean diproses berurutan,
+memakai batas jumlah balasan. Balasan hanya dijeda bila saklar Waktu Operasional
+di Pengaturan aktif dan jam sekarang di luar jadwal. Antrean diproses berurutan,
 kesalahan model 502 dicoba ulang hingga empat kali, dan pesan yang gagal tetap
 tersimpan untuk dicoba kembali setelah WhatsApp tersambung. Jika model tetap
 gagal tetapi WhatsApp tersedia, pelanggan menerima balasan bantuan singkat.
 Kedua toggle dan koneksi tetap harus aktif; jeda kirim mengikuti Pengaturan.
 
-Konteks AI mencakup instruksi admin penuh, hingga delapan pesan terakhir,
-kutipan Knowledge yang paling relevan, dan maksimal dua produk
-yang cocok dengan percakapan. Balasan diarahkan mengumpulkan nama, alamat,
-produk/varian, jumlah, dan menghitung total hanya dari harga serta ongkir yang
-tersimpan; data yang tidak ada harus dikonfirmasi, tidak boleh dikarang.
+Setiap percakapan dikunci pada pasangan nomor WhatsApp CS dan kontak pelanggan.
+Riwayat, memori, label, status baca, dan sumber iklan satu lead tidak pernah
+dipakai untuk lead lain atau untuk nomor CS lain.
+
+Konteks AI berisi aturan inti, instruksi admin utuh hingga 16.000 karakter,
+hingga 16 pesan terakhir dari chat lead itu, Knowledge PDF yang tidak sama dengan
+instruksi, katalog produk, dan STATUS PERCAKAPAN. STATUS berisi ongkir hasil
+hitungan sistem, data berlabel yang ditulis pelanggan (Nama, Alamat, Patokan,
+Paket), status konfirmasi pesanan, dan judul iklan bila lead datang dari iklan.
+
+Ongkir tidak lagi dicari model di potongan PDF. Teks PDF tarif dibaca sebagai
+aliran baris "Kecamatan / Kabupaten → Rp...", sehingga baris yang terpotong atau
+tergabung tetap terbaca (seluruh 5.139 baris pada PDF tarif saat ini).
+Sistem mencocokkan kecamatan beserta kabupaten/kotanya, mengabaikan nama jalan,
+desa, dan baris Nama, lalu memakai tarif kabupaten bila seluruh kecamatannya
+bertarif sama. Entri "Konfirmasi", nama wilayah ganda, alamat di Pulau Jawa, dan
+wilayah pada catatan "Jangan langsung menjanjikan tarif dasar" diteruskan ke
+model sebagai status tersendiri.
+
+Setiap draf diperiksa sebelum dikirim: nominal harus ada di instruksi, katalog,
+Knowledge, tarif, atau pesan pelanggan (termasuk total harga paket + ongkir);
+ongkir harus sama dengan tarif sistem; Nama/Alamat/Patokan harus pernah ditulis
+pelanggan di chat itu. Draf yang gagal dibuat ulang sekali dengan daftar
+perbaikan, lalu diganti balasan aman bila tetap gagal. Permintaan kode pos
+dihapus, ucapan terima kasih serta doa "sehat selalu untuk Kakak dan keluarga"
+hanya dikirim setelah pelanggan mengonfirmasi (misalnya YA PESAN), dan Uji
+Balasan AI memakai alur yang sama.
 
 Uji: node gateway/ai.test.mjs, node gateway/ai-http.test.mjs,
-node gateway/smoke.test.mjs. Kedua uji AI menggunakan router tiruan dan key uji,
+node gateway/shipping.test.mjs, node gateway/reply-rules.test.mjs,
+node gateway/smoke.test.mjs. Uji AI menggunakan router tiruan dan key uji,
 tanpa menggunakan akun model atau mengirim pesan WhatsApp nyata.
 Koneksi model yang sebenarnya harus diuji setelah pengguna memasukkan key.
 

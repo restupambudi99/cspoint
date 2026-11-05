@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { matchShippingTariffs, rankKnowledge } from './pdf-knowledge.mjs';
+import { rankKnowledge } from './pdf-knowledge.mjs';
+import { isTariffDocument, parseTariffText, resolveShipping } from './shipping.mjs';
 import { normalizeWaPhone } from './phone.mjs';
 
 const now = () => Date.now();
@@ -39,6 +40,34 @@ export function openStore(path) {
   const int = (value, fallback = 0) => {
     const parsed = Number.parseInt(value, 10);
     return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  // Tariff PDFs are parsed once per upload; the same SOP uploaded twice is read once.
+  const parsedDocuments = new Map();
+  const parsed = content => {
+    const key = content.length + ':' + content.slice(0, 80) + ':' + content.slice(-80);
+    if (!parsedDocuments.has(key)) {
+      if (parsedDocuments.size > 16) parsedDocuments.clear();
+      parsedDocuments.set(key, parseTariffText(content));
+    }
+    return parsedDocuments.get(key);
+  };
+  const knowledgeDocuments = () => {
+    const shipping = db.prepare("SELECT (SELECT value FROM settings WHERE key='shippingPdfName') AS name, value AS content FROM settings WHERE key='shippingPdfText' AND COALESCE((SELECT value FROM settings WHERE key='manualShippingPriority'),'true')<>'false'").get();
+    const rows = [
+      ...(shipping?.content ? [{ name: shipping.name || 'Tarif Ongkir Manual PDF', content: shipping.content, shippingPdf: true }] : []),
+      ...db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all(),
+    ];
+    const seen = new Set();
+    return rows.filter(row => {
+      const content = String(row.content ?? '').trim();
+      if (!content || seen.has(content)) return false;
+      seen.add(content);
+      return true;
+    }).map(row => {
+      const tariff = parsed(row.content);
+      // The Settings upload is a tariff list by definition; a Knowledge PDF only when it holds many rows.
+      return { name: row.name, content: row.content, tariff, isTariff: Boolean(row.shippingPdf) || isTariffDocument(tariff) };
+    });
   };
 
   return {
@@ -137,14 +166,11 @@ export function openStore(path) {
     knowledge: {
       list: () => db.prepare('SELECT id, name, mime, status, created_at, length(content) AS size FROM knowledge ORDER BY created_at DESC LIMIT 200').all(),
       relevant(query) {
-        const shipping = db.prepare("SELECT (SELECT value FROM settings WHERE key='shippingPdfName') AS name, value AS content FROM settings WHERE key='shippingPdfText' AND COALESCE((SELECT value FROM settings WHERE key='manualShippingPriority'),'true')<>'false'").get();
-        const documents = [
-          ...(shipping?.content ? [{ name: shipping.name || 'Tarif Ongkir Manual PDF', content: shipping.content }] : []),
-          ...db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all(),
-        ];
-        const tariffs = matchShippingTariffs(query, documents);
-        const related = rankKnowledge(query, documents).filter(item => !tariffs.some(tariff => item.name === tariff.name && item.content.includes(tariff.content)));
-        return [...tariffs, ...related].slice(0, 5);
+        // Tariff tables are answered by shipping(); their rows would only distract the model.
+        return rankKnowledge(query, knowledgeDocuments().filter(doc => !doc.isTariff));
+      },
+      shipping(thread) {
+        return resolveShipping(thread, knowledgeDocuments().filter(doc => doc.isTariff && doc.tariff.entries.length).map(doc => doc.tariff));
       },
       pendingPdfExtraction: () => db.prepare("SELECT id, name, content FROM knowledge WHERE mime='application/pdf' AND status='PDF tersimpan' AND source_content='' ORDER BY created_at ASC LIMIT 25").all(),
       saveExtractedPdf(knowledgeId, content) {

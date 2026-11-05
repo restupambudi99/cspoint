@@ -383,6 +383,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .ai-test-reply { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 12px; }
 .ai-test-reply:empty { display: none; }
 .ai-test-reply[data-kind="error"] { color: #b3261e; }
+.ai-rules { margin-top: 24px; border-radius: 10px; background: var(--soft); padding: 16px; }
+.ai-rules h3 { font-size: 15px; margin-bottom: 8px; }
+.ai-rules ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .form-grid > .full { grid-column: 1 / -1; }
 
 .menu-close, .chat-back { display: none; }

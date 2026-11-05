@@ -32,7 +32,7 @@ try {
     if (child.exitCode !== null) throw new Error(errors);
     try { await fetch(`${baseUrl}/status`); break; } catch { await new Promise(resolve => setTimeout(resolve, 100)); }
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
   const context = await browser.newContext({ extraHTTPHeaders: { Authorization: `Bearer ${token}` }, viewport: { width: 1365, height: 900 } });
   const page = await context.newPage();
   const pageErrors = [];
