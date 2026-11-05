@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { rankKnowledge } from './pdf-knowledge.mjs';
+import { matchShippingTariffs, rankKnowledge } from './pdf-knowledge.mjs';
 import { normalizeWaPhone } from './phone.mjs';
 
 const now = () => Date.now();
@@ -142,7 +142,9 @@ export function openStore(path) {
           ...(shipping?.content ? [{ name: shipping.name || 'Tarif Ongkir Manual PDF', content: shipping.content }] : []),
           ...db.prepare("SELECT name, content FROM knowledge WHERE status IN ('Siap dipakai AI','siap') ORDER BY created_at DESC LIMIT 25").all(),
         ];
-        return rankKnowledge(query, documents);
+        const tariffs = matchShippingTariffs(query, documents);
+        const related = rankKnowledge(query, documents).filter(item => !tariffs.some(tariff => item.name === tariff.name && item.content.includes(tariff.content)));
+        return [...tariffs, ...related].slice(0, 5);
       },
       pendingPdfExtraction: () => db.prepare("SELECT id, name, content FROM knowledge WHERE mime='application/pdf' AND status='PDF tersimpan' AND source_content='' ORDER BY created_at ASC LIMIT 25").all(),
       saveExtractedPdf(knowledgeId, content) {

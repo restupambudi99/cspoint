@@ -25,6 +25,7 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         const memory = messages.memory(message.jid);
         const knowledgeQuery = [...memory.map(item => item.text), ...thread.filter(item => !item.outgoing).slice(-4).map(item => item.text)].join('\n');
         const knowledge = store.knowledge.relevant(knowledgeQuery || message.text);
+        const matchedTariff = knowledge.find(item => item.type === 'shipping_tariff');
         const prompt = buildMessages(agent, thread, store.products.list(), knowledge, memory);
         let text, error;
         for (let attempt = 0; attempt < 4; attempt++) {
@@ -37,7 +38,9 @@ export function createAutoReply({ store, config, router, messages, buildMessages
         }
         if (!text && (!connection.isCurrent() || !allowed())) { config.deferReply(message.id); return; }
         const usedFallback = !text;
-        text ||= 'Baik kak, saya bantu cek dan lanjutkan pesanan ya. Saya perlu memastikan harga produk dan ongkirnya dulu agar totalnya tepat, jadi tidak akan menebak. Detail yang sudah dikirim tetap saya jadikan acuan; jika belum menyebut nama, alamat lengkap, atau jumlah, boleh kirimkan di sini.';
+        text ||= matchedTariff
+          ? `Ongkir ke ${matchedTariff.destination} adalah ${matchedTariff.amount} sesuai PDF tarif.`
+          : 'Baik kak, saya bantu cek dan lanjutkan pesanan ya. Saya perlu memastikan harga produk dan ongkirnya dulu agar totalnya tepat, jadi tidak akan menebak. Detail yang sudah dikirim tetap saya jadikan acuan; jika belum menyebut nama, alamat lengkap, atau jumlah, boleh kirimkan di sini.';
         // The interval limits closely spaced sends; it must not add a fixed delay to the first reply.
         if (lastSentAt) {
           const seconds = settings.minInterval + Math.random() * (settings.maxInterval - settings.minInterval);
