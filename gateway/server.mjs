@@ -48,7 +48,7 @@ const autoReply = createAutoReply({ store, config: aiConfig, router: aiRouter, m
   onSuccess: () => { autoReplyFailure = null; },
 });
 const live = (number, current) => number.socket === current && number.status === 'connected';
-const replyTo = (number, current, message) => autoReply(message, { isCurrent: () => live(number, current), send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, live(number, current) ? current : null, item.jid, [item.id], number.id) });
+const replyTo = (number, current, message) => autoReply({ ...message, instance: number.id }, { isCurrent: () => live(number, current), send: (jid, payload) => current.sendMessage(jid, payload), markRead: item => readConversation(messages, live(number, current) ? current : null, item.jid, [item.id], number.id) });
 
 const numbers = await openNumbers({
   sessionDir: process.env.SESSION_DIR || './session',
@@ -65,15 +65,17 @@ const numbers = await openNumbers({
         const saved = { id: message.key.id, jid, text, name: message.pushName || '', outgoing: Boolean(message.key.fromMe), status: message.status, timestamp: Number(message.messageTimestamp) * 1000 || Date.now(), instance: number.id };
         const fresh = store.settings().saveHistory ? messages.add(saved) : true;
         if (!saved.outgoing && !numbers.owns(jid) && Math.abs(Date.now() - saved.timestamp) < 120000) {
-          void replyTo(number, current, fresh ? saved : messages.byId(saved.id));
+          void replyTo(number, current, fresh ? saved : messages.byId(saved.id, number.id));
         }
       }
     } catch { console.error('Unable to persist incoming messages'); }
   },
   onOpen(number, current) {
-    for (const id of aiConfig.pendingReplies()) {
-      const message = messages.byId(id);
-      if (message && !message.outgoing && message.instance === number.id) void replyTo(number, current, message);
+    for (const pending of aiConfig.pendingReplies()) {
+      const id = typeof pending === 'string' ? pending : pending.message_id;
+      const instance = typeof pending === 'string' ? 'default' : pending.instance;
+      const message = instance === number.id ? messages.byId(id, number.id) : null;
+      if (message && !message.outgoing) void replyTo(number, current, message);
     }
   },
 });
@@ -107,7 +109,10 @@ async function readJson(req, limit = 1_000_000) {
 }
 
 // A customer is answered from the number they last wrote to; if that slot is gone, from any connected number.
-const ownerOf = jid => { const id = messages.numberFor(jid); return numbers.has(id) ? numbers.get(id) : numbers.primary(); };
+const ownerOf = (jid, instance) => {
+  const id = instance || messages.numberFor(jid);
+  return numbers.has(id) ? numbers.get(id) : instance ? null : numbers.primary();
+};
 
 const send = (res, code, payload) => { res.writeHead(code); res.end(JSON.stringify(payload)); };
 
@@ -206,30 +211,32 @@ const server = createServer(async (req, res) => {
       const several = numbers.list().length > 1;
       send(res, 200, messages.list().map(row => ({ ...row, numberLabel: several && numbers.has(row.instance) ? numbers.get(row.instance).label : '' }))); return;
     }
-    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '')); return; }
+    if (method === 'GET' && path === '/messages') { send(res, 200, messages.thread(url.searchParams.get('jid') || '', url.searchParams.get('instance') || 'default')); return; }
 
     if (method === 'GET' && path === '/labels') { send(res, 200, messages.labels()); return; }
     if (method === 'POST' && path === '/labels') { send(res, 200, messages.saveLabel(await readJson(req, 4000))); return; }
     if (method === 'DELETE' && /^\/labels\/[a-zA-Z0-9-]{1,64}$/.test(path)) { send(res, 200, { removed: messages.deleteLabel(path.split('/')[2]) }); return; }
     if (method === 'POST' && path === '/conversations/labels') {
       const body = await readJson(req, 12000);
-      messages.setLabels(body.jid, body.labelIds);
+      messages.setLabels(body.jid, body.labelIds, body.instance || 'default');
       send(res, 200, { saved: true }); return;
     }
     if (method === 'POST' && path === '/conversations/unread') {
       const body = await readJson(req, 4000);
-      messages.markUnread(body.jid);
+      messages.markUnread(body.jid, body.instance || 'default');
       send(res, 200, { unread: true }); return;
     }
     if (method === 'POST' && path === '/conversations/read') {
       const body = await readJson(req, 50000);
-      const owner = ownerOf(body.jid);
-      send(res, 200, await readConversation(messages, owner.status === 'connected' ? owner.socket : null, body.jid, body.ids, owner.id)); return;
+      const instance = body.instance || 'default';
+      const owner = ownerOf(body.jid, instance);
+      send(res, 200, await readConversation(messages, owner?.status === 'connected' ? owner.socket : null, body.jid, body.ids, instance)); return;
     }
 
     if (method === 'POST' && path === '/send') {
       const body = await readJson(req, 200000);
-      const sender = typeof body.number === 'string' ? numbers.get(body.number) : body.jid === undefined ? numbers.primary() : ownerOf(body.jid);
+      const sender = typeof body.number === 'string' ? numbers.get(body.number) : typeof body.instance === 'string' ? numbers.get(body.instance) : body.jid === undefined ? numbers.primary() : ownerOf(body.jid);
+      if (!sender) { send(res, 409, { error: 'Nomor WhatsApp untuk percakapan ini tidak tersedia. Pilih nomor yang masih aktif.' }); return; }
       const socket = sender.status === 'connected' ? sender.socket : null;
       if (!socket) { send(res, 409, { error: `${numbers.list().length > 1 ? sender.label : 'WhatsApp'} belum terhubung. Scan QR di Pengaturan.` }); return; }
       const phone = normalizeWaPhone(body.phone);
@@ -241,7 +248,7 @@ const server = createServer(async (req, res) => {
         try { jid = await resolveWaJid(socket, phone); }
         catch { send(res, 502, { error: 'Gagal memeriksa nomor di WhatsApp. Coba lagi.' }); return; }
         if (!jid) { send(res, 400, { error: 'Nomor tidak terdaftar di WhatsApp.' }); return; }
-      } else if (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid)) { send(res, 400, { error: 'Percakapan tidak valid.' }); return; }
+      } else if (typeof jid !== 'string' || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid) || !messages.hasConversation(jid, sender.id)) { send(res, 400, { error: 'Percakapan tidak valid untuk nomor WhatsApp yang dipilih.' }); return; }
       const result = await socket.sendMessage(jid, { text });
       if (store.settings().saveHistory) messages.add({ id: result.key.id, jid, text, name: '', outgoing: true, status: result.status, timestamp: Date.now(), instance: sender.id });
       send(res, 200, { id: result.key.id, status: 'submitted' }); return;

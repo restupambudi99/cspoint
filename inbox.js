@@ -61,7 +61,9 @@
     const labelFeedback = dialog.querySelector('#label-feedback');
     const colors = new Set(['blue', 'green', 'amber', 'purple', 'rose', 'slate']);
     const chip = label => `<span class="label-chip label-${colors.has(label.color) ? label.color : 'slate'}">${esc(label.name)}</span>`;
-    const renderSelectedLabels = () => { panel.querySelector('#chat-labels').innerHTML = (conversations.find(item => item.jid === selected)?.labels || []).map(chip).join(''); };
+    const conversationKey = item => `${item.instance || 'default'}::${item.jid}`;
+    const selectedConversation = () => conversations.find(item => conversationKey(item) === selected);
+    const renderSelectedLabels = () => { panel.querySelector('#chat-labels').innerHTML = (selectedConversation()?.labels || []).map(chip).join(''); };
 
     const drawList = () => {
       const query = panel.querySelector('#inbox-search').value.toLocaleLowerCase('id-ID');
@@ -69,21 +71,25 @@
       const items = conversations.filter(item => (filter !== 'unread' || item.unreadCount > 0) && (!labelFilter || (item.labels || []).some(label => label.id === labelFilter)) && `${item.name} ${item.jid} ${item.text}`.toLocaleLowerCase('id-ID').includes(query));
       panel.querySelector('#inbox-count').textContent = `${conversations.length} percakapan`;
       panel.querySelector('#unread-total').textContent = conversations.filter(item => item.unreadCount > 0).length;
-      const focusedJid = document.activeElement?.closest?.('#inbox-list [data-jid]')?.dataset.jid;
+      const focusedConversation = document.activeElement?.closest?.('#inbox-list [data-conversation]')?.dataset.conversation;
       list.innerHTML = items.length ? items.map(item => {
+        const key = conversationKey(item);
         const name = item.name || item.jid.split('@')[0];
-        return `<button class="conversation-row ${item.unreadCount ? 'unread' : 'read'} ${selected === item.jid ? 'selected' : ''}" aria-pressed="${selected === item.jid}" type="button" data-jid="${esc(item.jid)}"><span class="conversation-avatar">${esc(name.slice(0, 1).toUpperCase())}</span><span class="conversation-copy"><strong>${esc(name)}</strong><small>${esc(item.text || 'Belum ada pesan')}</small>${item.numberLabel ? `<small class="conversation-number">via ${esc(item.numberLabel)}</small>` : ''}<span class="label-chips">${(item.labels || []).map(chip).join('')}</span></span><span class="conversation-meta"><time>${item.timestamp ? esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })) : ''}</time><span class="read-state">${item.unreadCount ? `${item.unreadCount} baru` : 'Dibaca'}</span></span></button>`;
+        return `<button class="conversation-row ${item.unreadCount ? 'unread' : 'read'} ${selected === key ? 'selected' : ''}" aria-pressed="${selected === key}" type="button" data-conversation="${esc(key)}" data-instance="${esc(item.instance || 'default')}" data-jid="${esc(item.jid)}"><span class="conversation-avatar">${esc(name.slice(0, 1).toUpperCase())}</span><span class="conversation-copy"><strong>${esc(name)}</strong><small>${esc(item.text || 'Belum ada pesan')}</small>${item.numberLabel ? `<small class="conversation-number">via ${esc(item.numberLabel)}</small>` : ''}<span class="label-chips">${(item.labels || []).map(chip).join('')}</span></span><span class="conversation-meta"><time>${item.timestamp ? esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })) : ''}</time><span class="read-state">${item.unreadCount ? `${item.unreadCount} baru` : 'Dibaca'}</span></span></button>`;
       }).join('') : `<div class="inbox-empty"><strong>${filter === 'unread' ? 'Tidak ada chat belum dibaca' : 'Percakapan tidak ditemukan'}</strong><span>${query || labelFilter ? 'Coba ubah pencarian atau filter label.' : 'Pesan baru akan tampil di sini.'}</span></div>`;
       // The 5-second refresh rebuilds the list; keep keyboard users on their row.
-      if (focusedJid) [...list.querySelectorAll('[data-jid]')].find(row => row.dataset.jid === focusedJid)?.focus();
+      if (focusedConversation) [...list.querySelectorAll('[data-conversation]')].find(row => row.dataset.conversation === focusedConversation)?.focus();
       renderSelectedLabels();
     };
 
     const drawThread = async () => {
       if (!selected) return;
-      const jid = selected;
-      const items = await api(`messages?jid=${encodeURIComponent(jid)}`);
-      if (jid !== selected || !panel.isConnected) return;
+      const conversation = selectedConversation();
+      if (!conversation) return;
+      const { jid, instance = 'default' } = conversation;
+      const key = conversationKey(conversation);
+      const items = await api(`messages?jid=${encodeURIComponent(jid)}&instance=${encodeURIComponent(instance)}`);
+      if (key !== selected || !panel.isConnected) return;
       const nearBottom = history.scrollHeight - history.scrollTop - history.clientHeight < 90;
       const receipts = item => {
         if (!item.outgoing) return '';
@@ -93,14 +99,14 @@
       history.innerHTML = items.length ? items.map(item => `<div class="message-row ${item.outgoing ? 'outgoing' : 'incoming'}"><div class="message-bubble">${esc(item.text)}<small>${esc(new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))}${receipts(item)}</small></div></div>`).join('') : '<div class="chat-empty"><strong>Belum ada pesan</strong></div>';
       if (nearBottom) history.scrollTop = history.scrollHeight;
       const ids = items.filter(item => !item.outgoing && (!item.read_at || !item.receipt_sent_at)).map(item => item.id);
-      if (document.visibilityState === 'visible' && document.hasFocus() && !dialog.open && panel.querySelector('.inbox-chat').getClientRects().length && (ids.length || conversations.find(item => item.jid === jid)?.unreadCount)) {
+      if (document.visibilityState === 'visible' && document.hasFocus() && !dialog.open && panel.querySelector('.inbox-chat').getClientRects().length && (ids.length || conversations.find(item => conversationKey(item) === key)?.unreadCount)) {
         if (reading) return;
-        reading = api('conversations/read', post({ jid, ids }));
+        reading = api('conversations/read', post({ jid, instance, ids }));
         let result;
         try { result = await reading; } finally { reading = null; }
-        if (jid !== selected || !panel.isConnected) return;
-        const conversation = conversations.find(item => item.jid === jid);
-        if (conversation) conversation.unreadCount = 0;
+        if (key !== selected || !panel.isConnected) return;
+        const currentConversation = conversations.find(item => conversationKey(item) === key);
+        if (currentConversation) currentConversation.unreadCount = 0;
         drawList();
         if (result.receiptPending) feedback.textContent = 'Chat ditandai dibaca. Laporan baca WhatsApp menunggu koneksi.';
       }
@@ -155,13 +161,13 @@
     });
 
     list.addEventListener('click', async event => {
-      const row = event.target.closest('[data-jid]');
+      const row = event.target.closest('[data-conversation]');
       if (!row) return;
-      selected = row.dataset.jid;
-      const item = conversations.find(value => value.jid === selected);
-      const name = item?.name || selected.split('@')[0];
+      selected = row.dataset.conversation;
+      const item = selectedConversation();
+      const name = item?.name || row.dataset.jid.split('@')[0];
       panel.querySelector('#chat-name').textContent = name;
-      panel.querySelector('#chat-subtitle').textContent = selected.split('@')[0];
+      panel.querySelector('#chat-subtitle').textContent = item?.jid.split('@')[0] || row.dataset.jid.split('@')[0];
       panel.querySelector('#chat-avatar').textContent = name.slice(0, 1).toUpperCase();
       form.hidden = false;
       panel.querySelector('.chat-actions').hidden = false;
@@ -183,7 +189,7 @@
       if (labels.some(label => label.id === previous)) select.value = previous;
     };
     const drawLabelOptions = () => {
-      const assigned = new Set((conversations.find(item => item.jid === labelTarget)?.labels || []).map(label => label.id));
+      const assigned = new Set((conversations.find(item => conversationKey(item) === labelTarget)?.labels || []).map(label => label.id));
       dialog.querySelector('#label-dialog-help').textContent = labelTarget ? 'Centang label untuk percakapan ini. Perubahan langsung disimpan.' : 'Buat, ubah nama, atau hapus label di dashboard ini.';
       dialog.querySelector('#label-options').innerHTML = labels.map(label => `<div class="label-option"><label>${labelTarget ? `<input type="checkbox" data-assign-label="${esc(label.id)}" ${assigned.has(label.id) ? 'checked' : ''}>` : ''}${chip(label)}</label><button type="button" class="label-edit" data-edit-label="${esc(label.id)}" aria-label="Ubah label ${esc(label.name)}">Ubah</button><button type="button" class="label-delete" data-delete-label="${esc(label.id)}" aria-label="Hapus label ${esc(label.name)}">Hapus</button></div>`).join('') || '<p>Belum ada label. Buat label pertama di bawah.</p>';
     };
@@ -229,17 +235,18 @@
       const inputs = [...dialog.querySelectorAll('[data-assign-label]')];
       const labelIds = inputs.filter(input => input.checked).map(input => input.dataset.assignLabel);
       inputs.forEach(input => { input.disabled = true; });
-      try { await api('conversations/labels', post({ jid: labelTarget, labelIds })); conversations = await api('conversations'); drawList(); labelFeedback.textContent = 'Label percakapan tersimpan.'; }
+      try { const target = conversations.find(item => conversationKey(item) === labelTarget); if (!target) throw new Error('Percakapan sudah tidak tersedia.'); await api('conversations/labels', post({ jid: target.jid, instance: target.instance || 'default', labelIds })); conversations = await api('conversations'); drawList(); labelFeedback.textContent = 'Label percakapan tersimpan.'; }
       catch (error) { labelFeedback.textContent = error.message; }
       finally { drawLabelOptions(); }
     });
     panel.querySelector('[data-mark-unread]').addEventListener('click', async event => {
       if (!selected) return;
-      const jid = selected; event.target.disabled = true;
+      const target = selectedConversation(); if (!target) return;
+      const key = selected; event.target.disabled = true;
       selected = '';
       try {
         await reading?.catch(() => {});
-        await api('conversations/unread', post({ jid }));
+        await api('conversations/unread', post({ jid: target.jid, instance: target.instance || 'default' }));
         selected = ''; form.hidden = true; panel.querySelector('.chat-actions').hidden = true;
         panel.classList.remove('show-thread');
         panel.querySelector('#chat-name').textContent = 'Pilih percakapan';
@@ -248,7 +255,7 @@
         history.innerHTML = '<div class="chat-empty">Pilih percakapan untuk membaca pesan.</div>';
         conversations = await api('conversations'); drawList();
         feedback.textContent = 'Ditandai belum dibaca di dashboard. Laporan baca yang sudah dikirim ke WhatsApp tidak dibatalkan.';
-      } catch (error) { selected = jid; feedback.textContent = error.message; }
+      } catch (error) { selected = key; feedback.textContent = error.message; }
       finally { event.target.disabled = false; }
     });
     panel.querySelector('#inbox-search').addEventListener('input', drawList);
@@ -258,7 +265,8 @@
       const button = form.querySelector('button');
       button.disabled = true;
       try {
-        await api('send', post({ jid: selected, text: panel.querySelector('#chat-text').value }));
+        const target = selectedConversation(); if (!target) throw new Error('Pilih percakapan terlebih dahulu.');
+        await api('send', post({ jid: target.jid, instance: target.instance || 'default', text: panel.querySelector('#chat-text').value }));
         panel.querySelector('#chat-text').value = '';
         feedback.textContent = 'Pesan diserahkan ke WhatsApp.';
         await drawThread();

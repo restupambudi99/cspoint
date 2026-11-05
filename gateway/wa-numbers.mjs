@@ -103,11 +103,11 @@ export async function openNumbers({ sessionDir, makeSocket, useAuth, closeCodes,
         });
         current.ev.on('messages.update', updates => {
           if (!isCurrent()) return;
-          for (const { key, update } of updates) messages.updateReceipt(key, update.status);
+          for (const { key, update } of updates) messages.updateReceipt(key, update.status, number.id);
         });
         current.ev.on('message-receipt.update', updates => {
           if (!isCurrent()) return;
-          for (const { key, receipt } of updates) messages.updateReceipt(key, receipt.readTimestamp || receipt.playedTimestamp ? 4 : receipt.receiptTimestamp ? 3 : 0);
+          for (const { key, receipt } of updates) messages.updateReceipt(key, receipt.readTimestamp || receipt.playedTimestamp ? 4 : receipt.receiptTimestamp ? 3 : 0, number.id);
         });
 
         current.ev.on('connection.update', update => {
