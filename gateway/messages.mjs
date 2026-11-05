@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-export const LABEL_COLORS = ['blue', 'green', 'amber', 'purple', 'rose', 'slate'];
+export const LABEL_COLORS = ['blue', 'green', 'amber', 'purple', 'rose', 'slate', 'orange', 'red', 'yellow', 'lime', 'teal', 'cyan', 'indigo', 'pink', 'lavender', 'brown'];
+export const MAX_LABELS = 15;
 const invalid = message => Object.assign(new Error(message), { status: 400 });
 export function openMessages(path) {
   const db = new DatabaseSync(path);
@@ -77,6 +78,17 @@ export function openMessages(path) {
     try {
       for (const [name, color] of [['Pelanggan baru', 'blue'], ['Prospek', 'purple'], ['Menunggu pembayaran', 'amber'], ['Sudah bayar', 'green'], ['Pesanan selesai', 'slate']]) db.prepare('INSERT OR IGNORE INTO inbox_labels VALUES (?,?,?)').run(randomUUID(), name, color);
       db.prepare('INSERT INTO inbox_meta VALUES (?)').run('labels-seeded');
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  if (!db.prepare('SELECT 1 FROM inbox_meta WHERE key=?').get('labels-seeded-v2')) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const seedCount = Math.max(0, MAX_LABELS - db.prepare('SELECT count(*) AS total FROM inbox_labels').get().total);
+      for (const [name, color] of [['Baru', 'blue'], ['Proses', 'amber'], ['Belum Beli', 'rose']].slice(0, seedCount)) {
+        db.prepare('INSERT OR IGNORE INTO inbox_labels VALUES (?,?,?)').run(randomUUID(), name, color);
+      }
+      db.prepare('INSERT INTO inbox_meta VALUES (?)').run('labels-seeded-v2');
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
@@ -164,7 +176,7 @@ export function openMessages(path) {
       const name = typeof input.name === 'string' ? input.name.trim() : '';
       if (!name || name.length > 40 || !LABEL_COLORS.includes(input.color)) throw invalid('Isi nama label (maksimal 40 karakter) dan pilih warna.');
       if (input.id && !db.prepare('SELECT 1 FROM inbox_labels WHERE id=?').get(input.id)) throw invalid('Label tidak ditemukan.');
-      if (!input.id && this.labels().length >= 50) throw invalid('Maksimal 50 label.');
+      if (!input.id && this.labels().length >= MAX_LABELS) throw invalid('Maksimal ' + MAX_LABELS + ' label.');
       const label = { id: input.id || randomUUID(), name, color: input.color };
       try { db.prepare('INSERT INTO inbox_labels VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,color=excluded.color').run(label.id, name, label.color); }
       catch (error) { if (String(error.message).includes('UNIQUE')) throw invalid('Nama label sudah digunakan.'); throw error; }

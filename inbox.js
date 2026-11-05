@@ -23,7 +23,7 @@
         <div class="inbox-tabs" aria-label="Filter status baca"><button class="inbox-tab active" data-filter="all" aria-pressed="true" type="button">Semua</button><button class="inbox-tab" data-filter="unread" aria-pressed="false" type="button">Belum dibaca <span id="unread-total">0</span></button></div>
         <div class="inbox-ai-control"><div class="inbox-ai-copy"><strong>Balasan AI Agent</strong><span id="inbox-ai-status" role="status" aria-live="polite">Memeriksa konfigurasi…</span></div><label class="inbox-ai-switch"><span class="sr-only">Aktifkan balasan AI otomatis</span><input id="inbox-ai-toggle" type="checkbox" aria-describedby="inbox-ai-status"><span class="track"></span></label></div>
         <label class="inbox-search"><span>⌕</span><input id="inbox-search" type="search" placeholder="Cari percakapan…" aria-label="Cari percakapan"></label>
-        <div class="inbox-label-filter"><select id="label-filter" aria-label="Filter label"><option value="">Semua label</option></select><button type="button" class="button secondary" data-manage-labels>Kelola label</button></div>
+        <div class="inbox-label-filter"><select id="label-filter" class="sr-only" aria-label="Filter label" aria-hidden="true" tabindex="-1"><option value="">Semua label</option></select><div id="label-filter-chips" class="label-filter-chips" aria-label="Filter berdasarkan label"></div><button type="button" class="button secondary" data-manage-labels>Kelola label</button></div>
         <div id="inbox-list" class="inbox-list"><div class="inbox-loading">Memuat percakapan…</div></div>
       </aside>
       <section class="inbox-chat">
@@ -34,10 +34,12 @@
       </section>
     </section>
     <dialog id="inbox-label-dialog" class="inbox-label-dialog" aria-labelledby="label-dialog-title">
-      <div class="label-dialog-header"><h2 id="label-dialog-title">Label percakapan</h2><button type="button" class="icon-button" data-close-labels aria-label="Tutup label">×</button></div>
-      <p id="label-dialog-help"></p><div id="label-options"></div>
-      <form id="label-form"><input name="id" type="hidden"><label>Nama label<input name="name" maxlength="40" required placeholder="Contoh: Perlu follow up"></label><label>Warna<select name="color"><option value="blue">Biru</option><option value="green">Hijau</option><option value="amber">Kuning</option><option value="purple">Ungu</option><option value="rose">Merah muda</option><option value="slate">Abu-abu</option></select></label><div class="label-form-actions"><button class="button" type="submit">Simpan label</button><button class="button secondary" type="reset">Label baru</button></div></form>
+      <div class="label-dialog-header"><h2 id="label-dialog-title">Pilih daftar</h2><button type="button" class="icon-button" data-close-labels aria-label="Tutup label">×</button></div>
+      <p id="label-dialog-help"></p><button class="label-new-button" type="button" data-new-label>＋ <span>Daftar baru</span><span id="label-limit"></span></button>
+      <div class="label-list-heading">Daftar Anda</div><div id="label-options"></div>
+      <form id="label-form" hidden><input name="id" type="hidden"><label>Nama label<input name="name" maxlength="40" required placeholder="Contoh: Tindak lanjut"></label><label>Warna</label><div id="label-color-options" class="label-color-options" aria-label="Pilih warna"></div><select name="color" class="sr-only" aria-label="Warna label"></select><div class="label-form-actions"><button class="button" type="submit">Simpan label</button><button class="button secondary" type="reset">Batal</button></div></form>
       <p id="label-feedback" role="status" aria-live="polite"></p>
+      <div class="label-dialog-footer"><button class="button label-done" type="button" data-close-labels>Selesai</button></div>
     </dialog>`;
 
     const panel = root.querySelector('#live-inbox');
@@ -60,7 +62,10 @@
     const dialog = root.querySelector('#inbox-label-dialog');
     const labelForm = dialog.querySelector('#label-form');
     const labelFeedback = dialog.querySelector('#label-feedback');
-    const colors = new Set(['blue', 'green', 'amber', 'purple', 'rose', 'slate']);
+    const colorNames = { blue: 'Biru', green: 'Hijau', amber: 'Kuning', purple: 'Ungu', rose: 'Merah muda', slate: 'Abu-abu', orange: 'Jingga', red: 'Merah', yellow: 'Kuning terang', lime: 'Lime', teal: 'Teal', cyan: 'Sian', indigo: 'Indigo', pink: 'Merah jambu', lavender: 'Lavender', brown: 'Cokelat' };
+    const colors = new Set(Object.keys(colorNames));
+    const maxLabels = 15;
+    const labelDot = label => '<span class="label-dot label-dot-' + (colors.has(label.color) ? label.color : 'slate') + '" aria-hidden="true"></span>';
     const chip = label => `<span class="label-chip label-${colors.has(label.color) ? label.color : 'slate'}">${esc(label.name)}</span>`;
     const conversationKey = item => `${item.instance || 'default'}::${item.jid}`;
     const selectedConversation = () => conversations.find(item => conversationKey(item) === selected);
@@ -72,6 +77,7 @@
       const items = conversations.filter(item => (filter !== 'unread' || item.unreadCount > 0) && (!labelFilter || (item.labels || []).some(label => label.id === labelFilter)) && `${item.name} ${item.jid} ${item.text}`.toLocaleLowerCase('id-ID').includes(query));
       panel.querySelector('#inbox-count').textContent = `${conversations.length} percakapan`;
       panel.querySelector('#unread-total').textContent = conversations.filter(item => item.unreadCount > 0).length;
+      drawLabelFilters();
       const focusedConversation = document.activeElement?.closest?.('#inbox-list [data-conversation]')?.dataset.conversation;
       list.innerHTML = items.length ? items.map(item => {
         const key = conversationKey(item);
@@ -182,17 +188,43 @@
       drawList();
     }));
     panel.querySelector('#label-filter').addEventListener('change', drawList);
+    const drawLabelFilters = () => {
+      const selectedLabel = panel.querySelector('#label-filter').value;
+      const counts = new Map(labels.map(label => [label.id, 0]));
+      conversations.forEach(item => (item.labels || []).forEach(label => counts.set(label.id, (counts.get(label.id) || 0) + 1)));
+      panel.querySelector('#label-filter-chips').innerHTML = labels.map(label => '<button type="button" class="label-filter-chip ' + (selectedLabel === label.id ? 'active' : '') + '" data-label-filter="' + esc(label.id) + '" aria-pressed="' + (selectedLabel === label.id) + '">' + labelDot(label) + '<span>' + esc(label.name) + '</span><span class="label-filter-count">' + (counts.get(label.id) || 0) + '</span></button>').join('');
+    };
+    panel.querySelector('#label-filter-chips').addEventListener('click', event => {
+      const button = event.target.closest('[data-label-filter]');
+      if (!button) return;
+      const select = panel.querySelector('#label-filter');
+      select.value = select.value === button.dataset.labelFilter ? '' : button.dataset.labelFilter;
+      drawList();
+    });
     const loadLabels = async () => {
       labels = await api('labels');
       const select = panel.querySelector('#label-filter');
       const previous = select.value;
       select.innerHTML = '<option value="">Semua label</option>' + labels.map(label => `<option value="${esc(label.id)}">${esc(label.name)}</option>`).join('');
       if (labels.some(label => label.id === previous)) select.value = previous;
+      labelForm.elements.color.innerHTML = Object.entries(colorNames).map(([value, name]) => '<option value="' + value + '">' + name + '</option>').join('');
+      drawLabelFilters();
     };
     const drawLabelOptions = () => {
       const assigned = new Set((conversations.find(item => conversationKey(item) === labelTarget)?.labels || []).map(label => label.id));
-      dialog.querySelector('#label-dialog-help').textContent = labelTarget ? 'Centang label untuk percakapan ini. Perubahan langsung disimpan.' : 'Buat, ubah nama, atau hapus label di dashboard ini.';
-      dialog.querySelector('#label-options').innerHTML = labels.map(label => `<div class="label-option"><label>${labelTarget ? `<input type="checkbox" data-assign-label="${esc(label.id)}" ${assigned.has(label.id) ? 'checked' : ''}>` : ''}${chip(label)}</label><button type="button" class="label-edit" data-edit-label="${esc(label.id)}" aria-label="Ubah label ${esc(label.name)}">Ubah</button><button type="button" class="label-delete" data-delete-label="${esc(label.id)}" aria-label="Hapus label ${esc(label.name)}">Hapus</button></div>`).join('') || '<p>Belum ada label. Buat label pertama di bawah.</p>';
+      dialog.querySelector('#label-dialog-help').textContent = labelTarget ? 'Pilih satu atau beberapa label untuk percakapan ini.' : 'Buat dan atur label untuk mengelompokkan leads.';
+      dialog.querySelector('#label-limit').textContent = labels.length + '/' + maxLabels;
+      dialog.querySelector('#label-options').innerHTML = labels.map(label => '<div class="label-option"><label>' + labelDot(label) + '<span>' + esc(label.name) + '</span>' + (labelTarget ? '<input type="checkbox" data-assign-label="' + esc(label.id) + '"' + (assigned.has(label.id) ? ' checked' : '') + ' aria-label="' + esc(label.name) + '">' : '') + '</label>' + (labelTarget ? '' : '<div class="label-option-actions"><button type="button" class="label-edit" data-edit-label="' + esc(label.id) + '" aria-label="Ubah label ' + esc(label.name) + '" title="Ubah nama dan warna">✎</button><button type="button" class="label-delete" data-delete-label="' + esc(label.id) + '" aria-label="Hapus label ' + esc(label.name) + '" title="Hapus label">×</button></div>') + '</div>').join('') || '<p>Belum ada label. Buat label pertama di atas.</p>';
+      dialog.querySelector('[data-new-label]').disabled = labels.length >= maxLabels;
+      updateLabelForm();
+    };
+    const updateLabelForm = () => {
+      const currentColor = labelForm.elements.color.value || 'blue';
+      dialog.querySelector('#label-color-options').innerHTML = Object.entries(colorNames).map(([value, name]) => '<button type="button" class="label-color-swatch label-dot-' + value + '" data-label-color="' + value + '" aria-label="' + name + '" aria-pressed="' + (value === currentColor) + '" title="' + name + '"></button>').join('');
+      const editing = Boolean(labelForm.elements.id.value);
+      const submit = labelForm.querySelector('[type=submit]');
+      submit.disabled = !editing && labels.length >= maxLabels;
+      submit.textContent = editing ? 'Simpan perubahan' : 'Simpan label';
     };
     const openLabels = async target => {
       labelTarget = target;
@@ -201,13 +233,30 @@
     };
     panel.querySelector('[data-manage-labels]').addEventListener('click', () => openLabels(''));
     panel.querySelector('[data-chat-labels]').addEventListener('click', () => openLabels(selected));
-    dialog.querySelector('[data-close-labels]').addEventListener('click', () => dialog.close());
+    dialog.querySelectorAll('[data-close-labels]').forEach(button => button.addEventListener('click', () => dialog.close()));
     dialog.addEventListener('click', event => {
       if (event.target !== dialog) return;
       const box = dialog.getBoundingClientRect();
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close();
     });
-    labelForm.addEventListener('reset', () => { labelForm.elements.id.value = ''; });
+    dialog.querySelector('[data-new-label]').addEventListener('click', () => {
+      labelForm.reset();
+      labelForm.hidden = false;
+      labelForm.elements.name.focus();
+      updateLabelForm();
+    });
+    dialog.querySelector('#label-color-options').addEventListener('click', event => {
+      const swatch = event.target.closest('[data-label-color]');
+      if (!swatch) return;
+      labelForm.elements.color.value = swatch.dataset.labelColor;
+      updateLabelForm();
+    });
+    labelForm.elements.color.addEventListener('change', updateLabelForm);
+    labelForm.addEventListener('reset', () => {
+      labelForm.elements.id.value = '';
+      labelForm.hidden = true;
+      setTimeout(updateLabelForm);
+    });
     labelForm.addEventListener('submit', async event => {
       event.preventDefault();
       const button = labelForm.querySelector('[type=submit]'); button.disabled = true;
@@ -215,6 +264,7 @@
         await api('labels', post(Object.fromEntries(new FormData(labelForm))));
         labelForm.reset();
         await loadLabels(); conversations = await api('conversations'); drawList(); drawLabelOptions();
+        labelForm.hidden = true;
         labelFeedback.textContent = 'Label tersimpan.';
       } catch (error) { labelFeedback.textContent = error.message; }
       finally { button.disabled = false; }
@@ -223,7 +273,7 @@
       const edit = event.target.closest('[data-edit-label]');
       if (edit) {
         const label = labels.find(item => item.id === edit.dataset.editLabel);
-        if (label) { for (const name of ['id', 'name', 'color']) labelForm.elements[name].value = label[name]; labelForm.elements.name.focus(); }
+        if (label) { for (const name of ['id', 'name', 'color']) labelForm.elements[name].value = label[name]; labelForm.hidden = false; updateLabelForm(); labelForm.elements.name.focus(); }
       }
       const remove = event.target.closest('[data-delete-label]');
       if (!remove || !confirm('Hapus label ini dari semua percakapan?')) return;
